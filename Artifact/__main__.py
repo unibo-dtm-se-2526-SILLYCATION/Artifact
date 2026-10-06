@@ -1,0 +1,3 @@
+import Artifact
+
+Artifact.main()
