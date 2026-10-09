@@ -1,6 +1,6 @@
 import pytest
 
-from Artifact import MyClass
+from sillycation import MyClass
 
 
 # can test using classes, name must begin with `Test`

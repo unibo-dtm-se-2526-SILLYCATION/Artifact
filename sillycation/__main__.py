@@ -1,0 +1,3 @@
+import sillycation
+
+sillycation.main()
