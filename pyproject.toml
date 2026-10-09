@@ -1,11 +1,13 @@
 [tool.poetry]
-name = "Artifact"
+name = "sillycation"
 packages = [
-    { include = "Artifact" },
+    { include = "sillycation" },
 ]
 version = "2.4.1"
-description = "A template for Python projects, using Poetry"
-authors = ["Giovanni Ciatto <giovanni.ciatto@unibo.it>"]
+description = "A web application for groups of friends to collect, vote on, and rank memorable moments from their trips."
+authors = ["Arianna Cortesi <arianna.cortesi2@unibo.it>", 
+            "Camilla Iocca <camilla.iocca@studio.unibo.it>",
+            "Chiara Avoni <chiara.avoni@studio.unibo.it>"]
 license = "Apache 2.0"
 readme = "README.md"
 
@@ -30,7 +32,7 @@ ruff-check = "ruff check"
 ruff-fix = "ruff check --fix"
 format = "ruff format"
 format-check = "ruff format --check"
-mypy = "mypy Artifact tests"
+mypy = "mypy sillycation tests"
 compile = "python -m compileall Artifact tests"
 static-checks = [
     "ruff-check",
