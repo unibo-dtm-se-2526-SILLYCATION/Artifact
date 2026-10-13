@@ -3,7 +3,7 @@ name = "sillycation"
 packages = [
     { include = "sillycation" },
 ]
-version = "2.4.1"
+version = "0.1.0"
 description = "A web application for groups of friends to collect, vote on, and rank memorable moments from their trips."
 authors = ["Arianna Cortesi <arianna.cortesi2@unibo.it>", 
             "Camilla Iocca <camilla.iocca@studio.unibo.it>",
@@ -33,7 +33,7 @@ ruff-fix = "ruff check --fix"
 format = "ruff format"
 format-check = "ruff format --check"
 mypy = "mypy sillycation tests"
-compile = "python -m compileall Artifact tests"
+compile = "python -m compileall sillycation tests"
 static-checks = [
     "ruff-check",
     "mypy",
