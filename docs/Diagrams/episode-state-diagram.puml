@@ -1,0 +1,96 @@
+@startuml SillycationEpisodeStateDiagram
+title Sillycation - Episode State Diagram
+
+hide empty description
+
+'Initial State
+[*] --> DRAFT : Episode created
+
+'Episode State
+
+state DRAFT
+state SUBMITTED
+state VOTING
+state COMPLETED
+
+'Transition
+DRAFT --> SUBMITTED : submit()\n[author requests submission\nand Trip is ACTIVE]
+
+SUBMITTED --> VOTING : openVoting()\n[automatic after successful submission]
+
+VOTING --> COMPLETED : complete()\n[all eligible participants have voted]
+
+COMPLETED --> [*]
+
+'State Rules
+note right of DRAFT
+  The Episode is editable.
+
+  Only the author may edit
+  or delete the Episode.
+
+  The protagonist must be
+  a participant of the same Trip.
+
+  The Episode date must fall
+  within the Trip date interval.
+end note
+
+
+note right of SUBMITTED
+  The Episode is visible to
+  all Trip participants.
+
+  The Episode becomes immutable.
+
+  This state is transient:
+  voting opens automatically
+  after successful submission.
+end note
+
+
+note right of VOTING
+  Only eligible participants
+  may vote.
+
+  Each eligible participant
+  may vote at most once.
+
+  Vote values must be
+  integers from 1 to 5.
+
+  The protagonist cannot vote.
+
+  Submitted Votes cannot
+  be modified or deleted.
+end note
+
+
+note right of COMPLETED
+  All eligible participants
+  have voted.
+
+  No additional Votes
+  are accepted.
+
+  The final Episode score
+  is the arithmetic mean
+  of all valid Votes.
+
+  The Episode contributes
+  to the participant ranking.
+end note
+
+'General Contraint
+note bottom
+  Episode creation and lifecycle transitions occur only while the Trip is ACTIVE.
+  Episodes remain available afterward for historical access.
+
+  Backward transitions and
+  skipped transitions are not allowed.
+
+  SUBMITTED -> VOTING occurs
+  automatically.
+end note
+
+@enduml

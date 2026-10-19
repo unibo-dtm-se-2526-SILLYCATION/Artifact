@@ -1,0 +1,140 @@
+@startuml SillycationVoteEpisodeSequence
+
+title Sillycation - Vote on Episode and Automatic Completion
+
+autonumber
+
+actor Voter
+
+boundary Frontend
+control "FastAPI Controller" as API
+control "VoteService" as Service
+
+participant "TripRepository" as TripRepo
+participant "Trip <<Aggregate Root>>" as Trip
+participant "EpisodeRepository" as EpisodeRepo
+participant "Episode <<Aggregate Root>>" as Episode
+
+'Cast Vote
+Voter -> Frontend : select rating (1..5)
+Frontend -> API : POST /api/v1/episodes/{episodeId}/votes\n(value)
+
+API -> Service : castVote(voterId, episodeId, value)
+
+Service -> EpisodeRepo : getById(episodeId)
+EpisodeRepo --> Service : Episode / not found
+
+
+alt Episode not found
+
+    Service --> API : error: Episode not found
+    API --> Frontend : 404 Not Found
+    Frontend --> Voter : show error
+
+else Episode found
+
+    Service -> Service : verify Episode.status == VOTING
+
+    alt Episode is not VOTING
+
+        Service --> API : error: voting not allowed
+        API --> Frontend : 409 Conflict
+        Frontend --> Voter : show error
+
+    else Episode is VOTING
+
+        Service -> TripRepo : getById(Episode.tripId)
+        TripRepo --> Service : Trip
+
+        Service -> Service : verify Trip.status == ACTIVE
+
+        alt Trip is not ACTIVE
+
+            Service --> API : error: voting not allowed
+            API --> Frontend : 409 Conflict
+            Frontend --> Voter : show error
+
+        else Trip is ACTIVE
+
+            Service -> Trip : isParticipant(voterId)
+            Trip --> Service : true / false
+
+            alt Voter is not a participant
+
+                Service --> API : error: unauthorized
+                API --> Frontend : 403 Forbidden
+                Frontend --> Voter : show error
+
+            else Voter is a participant
+
+                Service -> Service : verify voterId != Episode.protagonistId
+
+                alt Voter is the protagonist
+
+                    Service --> API : error: protagonist cannot vote
+                    API --> Frontend : 403 Forbidden
+                    Frontend --> Voter : show error
+
+                else Voter is eligible
+
+                    Service -> Service : validate value is integer\nand 1 <= value <= 5
+
+                    alt Vote value is invalid
+
+                        Service --> API : error: invalid vote value
+                        API --> Frontend : 400 Bad Request
+                        Frontend --> Voter : show error
+
+                    else Vote value is valid
+
+                        Service -> Episode : hasVoteFrom(voterId)
+                        Episode --> Service : true / false
+
+                        alt Voter already voted
+
+                            Service --> API : error: duplicate vote
+                            API --> Frontend : 409 Conflict
+                            Frontend --> Voter : show error
+
+                        else No previous Vote
+
+                            Service -> Trip : getParticipants()
+                            Trip --> Service : locked participant set
+
+                            Service -> Service : derive eligible voters\nTrip participants - Episode protagonist
+                            Service -> Episode : castVote(voterId, value, eligibleVoters, Trip.status)
+                            Episode -> Episode : enforce voting rules and VoteValue\nadd immutable Vote internally
+                            Episode -> Episode : check whether all\neligible voters have voted
+
+                            alt Eligible votes are still missing
+
+                                Service -> EpisodeRepo : save(Episode)\nincluding new Vote; status = VOTING
+                                EpisodeRepo --> Service : saved Episode
+
+                                Service --> API : Vote accepted\nEpisode remains VOTING
+                                API --> Frontend : 201 Created
+                                Frontend --> Voter : show vote recorded
+
+                            else All eligible voters have voted
+
+                                Episode -> Episode : calculateScore()\narithmetic mean of all valid Votes
+
+                                Episode -> Episode : complete() automatically\nVOTING -> COMPLETED
+
+                                Service -> EpisodeRepo : save(Episode)\nincluding new Vote, COMPLETED status and final score
+                                EpisodeRepo --> Service : updated Episode
+
+                                Service --> API : Vote accepted\nEpisode COMPLETED + score
+                                API --> Frontend : 201 Created
+                                Frontend --> Voter : show final Episode score
+
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+@enduml

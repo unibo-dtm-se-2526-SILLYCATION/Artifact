@@ -1,0 +1,164 @@
+@startuml SillycationCreateSubmitEpisodeSequence
+title Sillycation - Create and Submit Episode
+
+autonumber
+
+actor "Episode Author" as Author
+
+boundary Frontend
+control "FastAPI Controller" as API
+control "EpisodeService" as Service
+
+participant "TripRepository" as TripRepo
+participant "Trip <<Aggregate Root>>" as Trip
+participant "Episode <<Aggregate Root>>" as Episode
+participant "EpisodeRepository" as EpisodeRepo
+
+'Create Episode
+
+Author -> Frontend : enter episode data\n(title, description, date,\nprotagonist)
+
+Frontend -> API : POST /api/v1/trips/{tripId}/episodes
+
+API -> Service : createEpisode(authorId, tripId, data)
+
+Service -> TripRepo : getById(tripId)
+TripRepo --> Service : Trip / not found
+
+
+alt Trip not found
+
+    Service --> API : error: Trip not found
+    API --> Frontend : 404 Not Found
+    Frontend --> Author : show error
+
+else Trip found
+
+    Service -> Service : verify Trip.status == ACTIVE
+
+    alt Trip is not ACTIVE
+
+        Service --> API : error: Episode creation not allowed
+        API --> Frontend : 409 Conflict
+        Frontend --> Author : show error
+
+    else Trip is ACTIVE
+
+        Service -> Trip : isParticipant(authorId)
+        Trip --> Service : true / false
+
+        alt Author is not a participant
+
+            Service --> API : error: unauthorized
+            API --> Frontend : 403 Forbidden
+            Frontend --> Author : show error
+
+        else Author is a participant
+
+            Service -> Trip : isParticipant(protagonistId)
+            Trip --> Service : true / false
+
+            alt Protagonist is not a participant
+
+                Service --> API : error: invalid protagonist
+                API --> Frontend : 400 Bad Request
+                Frontend --> Author : show error
+
+            else Protagonist is valid
+
+                Service -> Service : validate episode date\nwithin Trip date interval
+
+                alt Episode date is invalid
+
+                    Service --> API : error: invalid episode date
+                    API --> Frontend : 400 Bad Request
+                    Frontend --> Author : show error
+
+                else Episode data is valid
+
+                    Service -> Episode : create(authorId, tripId, data, Trip)\nvalidate mandatory fields; status = DRAFT
+                    Service -> EpisodeRepo : save(Episode)
+                    EpisodeRepo --> Service : saved Episode
+
+                    Service --> API : Episode created
+                    API --> Frontend : 201 Created
+                    Frontend --> Author : show DRAFT Episode
+
+                end
+            end
+        end
+    end
+end
+
+'Submit Episode
+
+== Author submits the Episode ==
+
+Author -> Frontend : submit Episode
+
+Frontend -> API : POST /api/v1/episodes/{episodeId}/submit
+
+API -> Service : submitEpisode(authorId, episodeId)
+
+Service -> EpisodeRepo : getById(episodeId)
+EpisodeRepo --> Service : Episode / not found
+
+
+alt Episode not found
+
+    Service --> API : error: Episode not found
+    API --> Frontend : 404 Not Found
+    Frontend --> Author : show error
+
+else Episode found
+
+    Service -> Service : verify requester == Episode.author
+
+    alt requester is not the author
+
+        Service --> API : error: unauthorized
+        API --> Frontend : 403 Forbidden
+        Frontend --> Author : show error
+
+    else requester is the author
+
+        Service -> Service : verify Episode.status == DRAFT
+
+        alt Episode is not DRAFT
+
+            Service --> API : error: invalid Episode state
+            API --> Frontend : 409 Conflict
+            Frontend --> Author : show error
+
+        else Episode is DRAFT
+
+            Service -> TripRepo : getById(Episode.tripId)
+            TripRepo --> Service : Trip
+
+            Service -> Service : verify Trip.status == ACTIVE
+
+            alt Trip is not ACTIVE
+
+                Service --> API : error: submission not allowed
+                API --> Frontend : 409 Conflict
+                Frontend --> Author : show error
+
+            else Trip is ACTIVE
+
+                Service -> Episode : submit(authorId, Trip.status)\nDRAFT -> SUBMITTED
+
+                Episode -> Episode : openVoting() automatically\nSUBMITTED -> VOTING
+
+                Service -> EpisodeRepo : save(Episode)
+                EpisodeRepo --> Service : updated Episode
+
+                Service --> API : Episode submitted\nstatus = VOTING
+                API --> Frontend : 200 OK
+                Frontend --> Author : show Episode in voting phase
+
+            end
+        end
+    end
+end
+
+@enduml

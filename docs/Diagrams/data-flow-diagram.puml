@@ -1,0 +1,96 @@
+@startuml SillycationDataFlowDiagram
+
+title Sillycation - Data Flow Diagram (Level 1)
+
+left to right direction
+
+'External Entities
+actor "Registered User" as User
+actor "Trip Creator" as Creator
+actor "Participant" as Participant
+
+'Processes
+rectangle "P1\nAuthentication" as P1
+
+rectangle "P2\nTrip & Participant\nManagement" as P2
+
+rectangle "P3\nEpisode Management" as P3
+
+rectangle "P4\nVoting & Ranking" as P4
+
+rectangle "P5\nTrip Dashboard" as P5
+
+'Data Store
+database "D1\nUsers" as D1
+
+database "D2\nTrips, Participants\n& Join Requests" as D2
+
+database "D3\nEpisodes" as D3
+
+database "D4\nVotes" as D4
+
+'Authentication
+User --> P1 : registration data /\nlogin credentials
+
+P1 --> D1 : create / read User
+D1 --> P1 : User data
+
+P1 --> User : authentication result /\nauthentication token
+
+'Trip and Members 
+User --> P2 : create Trip /\ninvitation code
+
+Creator --> P2 : approve or reject\njoin request /\nchange Trip state
+
+User --> P2 : request to join Trip
+
+P2 --> D2 : store / update Trip,\nParticipant and JoinRequest data
+
+D2 --> P2 : Trip, Participant and\nJoinRequest data
+
+P2 --> User : Trip creation result
+P2 --> Creator : pending requests /\noperation result
+P2 --> User : join request result
+
+'Episode Management
+Participant --> P3 : Episode data /\nsubmit Episode
+
+P3 --> D2 : read Trip and\nParticipant data
+D2 --> P3 : Trip status /\nparticipant data
+
+P3 --> D3 : create / update Episode
+D3 --> P3 : Episode data
+
+P3 --> Participant : Episode status /\nvalidation result
+
+'Voting Ranking 
+Participant --> P4 : Vote value
+
+P4 --> D2 : read locked\nparticipant set
+D2 --> P4 : participant data
+
+P4 --> D3 : read / update Episode
+D3 --> P4 : Episode data
+
+P4 --> D4 : store Vote
+D4 --> P4 : Episode Votes
+
+P4 --> Participant : Vote result /\nEpisode score /\nranking data
+
+'Dashboard
+Participant --> P5 : request Trip dashboard
+Creator --> P5 : request Trip dashboard
+
+P5 --> D2 : read Trip and\nparticipant data
+D2 --> P5 : Trip and\nparticipant data
+
+P5 --> D3 : read Episodes
+D3 --> P5 : Episode data /\nEpisode scores
+
+P5 --> D4 : read Votes
+D4 --> P5 : Vote data
+
+P5 --> Participant : Trip information,\nEpisodes, statuses,\nranking
+P5 --> Creator : Trip information,\nEpisodes, statuses,\nranking
+
+@enduml

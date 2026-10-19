@@ -1,0 +1,100 @@
+@startuml SillycationJoinTripFlow
+title Sillycation - Join Trip Workflow
+
+start
+
+:User enters invitation code;
+
+if (Invitation code valid?) then (Yes)
+
+    :Load Trip;
+
+    if (Trip status = PLANNED?) then (Yes)
+
+        if (User already participant?) then (Yes)
+
+            :Reject request;
+            :Show "Already a participant";
+            stop
+
+        else (No)
+
+            if (Pending request already exists?) then (Yes)
+
+                :Reject request;
+                :Show "Request already pending";
+                stop
+
+            else (No)
+
+                :Check overlapping PLANNED\nor ACTIVE Trips;
+
+                if (Overlapping Trip exists?) then (Yes)
+
+                    :Reject request;
+                    :Show overlap error;
+                    stop
+
+                else (No)
+
+                    :Create JoinRequest;
+                    :Set status = PENDING;
+
+                    :Creator reviews request;
+
+                    if (Trip still PLANNED?) then (No)
+                        :Reject operation;
+                        :Show "Trip is not PLANNED";
+                        stop
+                    else (Yes)
+                    endif
+
+                    if (Creator approves?) then (Yes)
+
+                        :Re-check overlapping Trips;
+
+                        if (Overlap now exists?) then (Yes)
+
+                            :Reject approval;
+                            :Set JoinRequest status to REJECTED;
+                            :Do not add user as Participant;
+                            stop
+
+                        else (No)
+
+                            :Add User as Participant;
+                            :Set JoinRequest = APPROVED;
+                            :User becomes Participant;
+                            stop
+
+                        endif
+
+                    else (No)
+
+                        :Set JoinRequest = REJECTED;
+                        :User does not become Participant;
+                        stop
+
+                    endif
+
+                endif
+            endif
+        endif
+
+    else (No)
+
+        :Reject request;
+        :Show "Trip is not PLANNED";
+        stop
+
+    endif
+
+else (No)
+
+    :Reject request;
+    :Show "Invalid invitation code";
+    stop
+
+endif
+
+@enduml

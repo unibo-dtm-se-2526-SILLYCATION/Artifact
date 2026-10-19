@@ -1,0 +1,165 @@
+@startuml SillycationDomainClassDiagram
+title Sillycation - Domain Class Diagram
+
+'Domain Entities 
+class User{
+    id : UserId
+    username : String {unique}
+    email : String {unique}
+    passwordHash : String
+}
+
+class Trip <<Aggregate Root>>{
+    id : TripId
+    name : String
+    description : String [0..1]
+    creatorId : UserId
+    period : TripPeriod
+    invitationCode : InvitationCode {unique}
+    status : TripStatus
+}
+
+note left of Trip
+  The creator is always
+  also a participant
+  of the Trip.
+end note
+
+class Participant{
+    userId : UserId
+    tripId : TripId
+}
+
+class JoinRequest{
+    id : JoinRequestId
+    tripId : TripId
+    userId : UserId
+    status : JoinRequestStatus
+}
+
+class Episode <<Aggregate Root>>{
+    id : EpisodeId
+    tripId : TripId
+    authorId : UserId
+    protagonistId : UserId
+    title : String
+    description : String
+    date : Date
+    status : EpisodeStatus
+    /score : Decimal [0..1] 
+}
+
+note right of Episode
+  Author and protagonist must be
+  participants of the same Trip.
+end note
+
+class Vote{
+    id : VoteId
+    episodeId : EpisodeId
+    voterId : UserId
+    value : VoteValue
+}
+
+class TripPeriod <<Value Object>> {
+    startDate : Date
+    endDate : Date
+    overlaps(other : TripPeriod) : Boolean
+}
+note left of TripPeriod
+  startDate <= endDate
+  Overlap includes shared boundary dates.
+end note
+
+class InvitationCode <<Value Object>> {
+    value : String
+}
+note left of InvitationCode
+  System-generated, unique per Trip,
+  and immutable.
+end note
+
+class VoteValue <<Value Object>> {
+    value : Integer
+}
+note right of VoteValue
+  Integer in [1, 5]; immutable.
+end note
+
+class UserId <<Value Object>>
+class TripId <<Value Object>>
+class JoinRequestId <<Value Object>>
+class EpisodeId <<Value Object>>
+class VoteId <<Value Object>>
+
+Trip "1" *-- "1" TripPeriod
+Trip "1" *-- "1" InvitationCode
+Vote "1" *-- "1" VoteValue
+
+'Enumerations
+enum TripStatus {
+    PLANNED
+    ACTIVE
+    COMPLETED
+    ARCHIVED
+
+}
+
+enum EpisodeStatus {
+    DRAFT
+    SUBMITTED
+    VOTING
+    COMPLETED
+}
+
+enum JoinRequestStatus {
+    PENDING
+    APPROVED
+    REJECTED
+}
+
+' Relationships:
+User "1" -- "0..*" Trip : creates
+
+User "1" -- "0..*" Participant : has
+
+Trip "1" *-- "1..*" Participant : controls
+
+'Join requests
+User "1" -- "0..*" JoinRequest : submits
+
+Trip "1" *-- "0..*" JoinRequest : controls
+
+'Episodes
+Episode "0..*" --> "1" Trip : references via TripId
+
+User "1" -- "0..*" Episode : authors
+
+User "1" -- "0..*" Episode : protagonist of
+
+note right of Episode
+  Protagonist must be a participant
+  of the same Trip.
+end note
+
+' Votes
+User "1" -- "0..*" Vote : casts
+
+Episode "1" *-- "0..*" Vote : controls
+
+note right of Vote
+  value must be an integer in [1, 5]
+
+  A User can vote at most once
+  on the same Episode.
+
+  The protagonist cannot vote
+  on their own Episode.
+
+  The voter must be a Participant of the Trip.
+  Votes are accepted only while the Trip is ACTIVE
+  and the Episode is in VOTING state.
+  Submitted Votes cannot be modified or deleted.
+end note
+
+@enduml

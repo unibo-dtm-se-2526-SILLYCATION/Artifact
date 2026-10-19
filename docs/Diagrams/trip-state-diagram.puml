@@ -1,0 +1,82 @@
+@startuml SillycationTripStateDiagram
+title Sillycation - Trip State Diagram
+hide empty description
+
+'Initial State
+[*] --> PLANNED : Trip created
+
+'Trip State
+state PLANNED
+state ACTIVE
+state COMPLETED
+state ARCHIVED
+
+'Transition
+PLANNED --> ACTIVE : activate()\n[currentDate >= startDate\nand participantCount >= 2]
+
+ACTIVE --> COMPLETED : complete()\n[currentDate >= endDate\nand all Episodes are COMPLETED]
+
+COMPLETED --> ARCHIVED : archive()
+
+ARCHIVED --> [*]
+
+'State Rules
+note right of PLANNED
+  Participant set may change.
+
+  Users may submit join requests.
+
+  The creator may approve or reject
+  pending join requests.
+
+  Episodes cannot be created,
+  submitted, or voted on.
+end note
+
+
+note right of ACTIVE
+  Participant set is locked.
+
+  No new join requests or approvals
+  are allowed.
+
+  Participants may create
+  and submit Episodes.
+
+  Eligible participants may vote.
+end note
+
+
+note right of COMPLETED
+  The game is finished.
+
+  No participants, Episodes,
+  or Votes may be added or modified.
+
+  The final ranking is definitive.
+
+  The Trip remains visible
+  in completed-trip history.
+end note
+
+
+note right of ARCHIVED
+  The Trip is read-only.
+
+  It is removed from the default
+  Trip list.
+
+  It remains accessible through
+  the archive/history view.
+end note
+
+'General Contraint
+note bottom
+  Only the Trip creator may explicitly
+  perform lifecycle transitions.
+
+  Backward transitions and
+  skipped transitions are not allowed.
+end note
+
+@enduml
