@@ -1,0 +1,104 @@
+@startuml SillycationVoteEpisodeFlow
+
+title Sillycation - Vote and Automatic Completion Workflow
+
+start
+
+:Participant selects Vote value;
+
+if (Episode exists?) then (Yes)
+
+    if (Episode status = VOTING?) then (Yes)
+
+        if (Trip status = ACTIVE?) then (Yes)
+
+            if (User is Trip participant?) then (Yes)
+
+                if (User is Episode protagonist?) then (Yes)
+
+                    :Reject Vote;
+                    :Protagonist cannot vote;
+                    stop
+
+                else (No)
+
+                    if (Vote is an integer\nbetween 1 and 5?) then (Yes)
+
+                        if (User already voted\non this Episode?) then (Yes)
+
+                            :Reject Vote;
+                            :Duplicate Votes are not allowed;
+                            stop
+
+                        else (No)
+
+                            :Add Vote to Episode;
+
+                            :Determine eligible voters;
+                            :Eligible voters = Trip participants\nminus Episode protagonist;
+
+                            if (Have all eligible voters voted?) then (Yes)
+
+                                :Calculate Episode score;
+                                :score = arithmetic mean\nof all valid Votes;
+
+                                :Transition\nVOTING -> COMPLETED;
+
+                                :Reject any future Votes;
+
+                                :Episode contributes\nto participant ranking;
+
+                                stop
+
+                            else (No)
+
+                                :Keep Episode in VOTING;
+                                :Wait for remaining eligible voters;
+                                stop
+
+                            endif
+
+                        endif
+
+                    else (No)
+
+                        :Reject Vote;
+                        :Vote must be integer 1..5;
+                        stop
+
+                    endif
+
+                endif
+
+            else (No)
+
+                :Reject Vote;
+                :User is not a Trip participant;
+                stop
+
+            endif
+
+        else (No)
+
+            :Reject Vote;
+            :Voting only allowed\nwhile Trip is ACTIVE;
+            stop
+
+        endif
+
+    else (No)
+
+        :Reject Vote;
+        :Episode is not in VOTING state;
+        stop
+
+    endif
+
+else (No)
+
+    :Return Episode not found;
+    stop
+
+endif
+
+@enduml

@@ -1,0 +1,155 @@
+@startuml SillycationJoinTripSequence
+title Sillycation - Join Trip Request and Approval
+
+autonumber
+
+actor Applicant
+actor "Trip Creator" as Creator
+
+boundary Frontend
+control "FastAPI Controller" as API
+control "JoinTripService" as Service
+
+participant "TripRepository" as TripRepo
+participant "Trip <<Aggregate Root>>" as Trip
+
+'Join Requests
+
+Applicant -> Frontend : enter invitation code
+Frontend -> API : POST /api/v1/trips/join\n(invitationCode)
+
+API -> Service : requestJoin(userId, invitationCode)
+
+Service -> TripRepo : getByInvitationCode(invitationCode)
+TripRepo --> Service : Trip / not found
+
+
+alt invitation code is invalid
+
+    Service --> API : error: invalid invitation code
+    API --> Frontend : 404 / validation error
+    Frontend --> Applicant : show error
+
+else Trip found
+
+    Service -> Service : verify Trip.status == PLANNED
+
+    alt Trip is not PLANNED
+
+        Service --> API : error: joining not allowed
+        API --> Frontend : 409 Conflict
+        Frontend --> Applicant : show error
+
+    else Trip is PLANNED
+
+        Service -> Trip : isParticipant(userId)
+        Trip --> Service : true / false
+
+        Service -> Trip : pendingRequestExists(userId)
+        Trip --> Service : true / false
+
+        alt already participant or request already pending
+
+            Service --> API : error: duplicate request
+            API --> Frontend : 409 Conflict
+            Frontend --> Applicant : show error
+
+        else no duplicate
+
+            Service -> TripRepo : findActiveOrPlannedTripsByParticipant(userId)
+            TripRepo --> Service : user's Trips
+
+            Service -> Service : check date overlap
+
+            alt overlapping Trip exists
+
+                Service --> API : error: overlapping Trip
+                API --> Frontend : 409 Conflict
+                Frontend --> Applicant : show error
+
+            else no overlap
+
+                Service -> Trip : requestToJoin(userId)\ncreate PENDING JoinRequest
+                Trip --> Service : JoinRequest
+                Service -> TripRepo : save(Trip)
+                TripRepo --> Service : saved Trip
+
+                Service --> API : JoinRequest created
+                API --> Frontend : 201 Created
+                Frontend --> Applicant : request pending
+
+            end
+        end
+    end
+end
+
+'Creator Approval
+== Creator reviews pending request ==
+
+Creator -> Frontend : open pending requests
+Frontend -> API : GET /api/v1/trips/{tripId}/join-requests
+
+API -> Service : getPendingRequests(creatorId, tripId)
+
+Service -> TripRepo : getById(tripId)
+TripRepo --> Service : Trip
+
+Service -> Service : verify requester is Trip creator
+
+Service -> Trip : getPendingRequests()
+Trip --> Service : pending requests
+
+Service --> API : pending requests
+API --> Frontend : 200 OK
+Frontend --> Creator : display requests
+
+
+Creator -> Frontend : approve request
+Frontend -> API : POST /api/v1/trips/{tripId}/join-requests/{requestId}/approve
+
+API -> Service : approveRequest(creatorId, tripId, requestId)
+
+Service -> TripRepo : getById(tripId)
+TripRepo --> Service : Trip
+
+Service -> Trip : getJoinRequest(requestId)
+Trip --> Service : JoinRequest / not found
+Service -> Service : verify creator authorization
+Service -> Service : verify Trip.status == PLANNED
+Service -> Service : verify JoinRequest.status == PENDING
+
+break unauthorized, request not found, Trip not PLANNED, or request not PENDING
+    Service --> API : error: invalid approval
+    API --> Frontend : 403 / 404 / 409 as appropriate
+    Frontend --> Creator : show error
+end
+
+Service -> TripRepo : findActiveOrPlannedTripsByParticipant(applicantId)
+TripRepo --> Service : applicant's Trips
+
+Service -> Service : re-check date overlap
+
+
+alt overlap now exists
+
+    Service -> Trip : rejectJoinRequest(creatorId, requestId)\nJoinRequest -> REJECTED; do not add Participant
+    Service -> TripRepo : save(Trip)
+    TripRepo --> Service : saved Trip
+
+    Service --> API : approval rejected
+    API --> Frontend : 409 Conflict
+    Frontend --> Creator : show conflict
+
+else approval valid
+
+    Service -> Trip : approveJoinRequest(creatorId, requestId)\nJoinRequest -> APPROVED; add Participant
+    Service -> TripRepo : save(Trip)
+    TripRepo --> Service : saved Trip
+
+    Service --> API : approval successful
+    API --> Frontend : 200 OK
+    Frontend --> Creator : participant added
+
+end
+
+@enduml

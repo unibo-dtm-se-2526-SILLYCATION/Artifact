@@ -1,0 +1,109 @@
+@startuml SillycationCreateSubmitEpisodeFlow
+
+title Sillycation - Create and Submit Episode Workflow
+
+start
+
+:Participant enters Episode data;
+
+if (Trip status = ACTIVE?) then (Yes)
+
+    if (Author is Trip participant?) then (Yes)
+
+        if (Protagonist is Trip participant?) then (Yes)
+
+            if (Episode date within Trip dates?) then (Yes)
+
+                :Create Episode;
+                :Set status = DRAFT;
+
+                if (Author wants to edit?) then (Yes)
+
+                    :Edit DRAFT Episode;
+                    :Validate Episode data again;
+
+                else (No)
+
+                endif
+
+                if (Author deletes Episode?) then (Yes)
+
+                    :Delete DRAFT Episode;
+                    stop
+
+                else (No)
+
+                    if (Author submits Episode?) then (Yes)
+
+                        if (Episode status = DRAFT?) then (Yes)
+
+                            if (Trip still ACTIVE?) then (Yes)
+
+                                :Validate Episode;
+                                :Transition DRAFT -> SUBMITTED;
+                                :Episode becomes immutable;
+                                :Episode becomes visible\nto Trip participants;
+
+                                :Automatically open voting;
+                                :Transition SUBMITTED -> VOTING;
+
+                                stop
+
+                            else (No)
+
+                                :Reject submission;
+                                :Show "Trip is not ACTIVE";
+                                stop
+
+                            endif
+
+                        else (No)
+
+                            :Reject submission;
+                            :Episode is not DRAFT;
+                            stop
+
+                        endif
+
+                    else (No)
+
+                        :Keep Episode as DRAFT;
+                        stop
+
+                    endif
+
+                endif
+
+            else (No)
+
+                :Reject Episode creation;
+                :Show invalid Episode date;
+                stop
+
+            endif
+
+        else (No)
+
+            :Reject Episode creation;
+            :Show invalid protagonist;
+            stop
+
+        endif
+
+    else (No)
+
+        :Reject Episode creation;
+        :Show authorization error;
+        stop
+
+    endif
+
+else (No)
+
+    :Reject Episode creation;
+    :Episodes can only be created\nfor ACTIVE Trips;
+    stop
+
+endif
+
+@enduml
