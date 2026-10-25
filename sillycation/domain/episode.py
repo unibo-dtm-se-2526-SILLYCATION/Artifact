@@ -1,10 +1,28 @@
-"""Episode draft data and submission, independent of persistence and voting."""
+"""Episode lifecycle and voting, independent of persistence."""
 
+from dataclasses import dataclass
 from datetime import date as Date
+from decimal import Decimal
 from enum import Enum
+from typing import Iterable, Optional
 
-from sillycation.domain.identifiers import EpisodeId, TripId, UserId
+from sillycation.domain.identifiers import EpisodeId, TripId, UserId, VoteId
 from sillycation.domain.trip import TripStatus
+from sillycation.domain.value_objects import VoteValue
+
+
+@dataclass(frozen=True)
+class Vote:
+    """An immutable vote owned by an Episode."""
+
+    id: VoteId
+    episode_id: EpisodeId
+    voter_id: UserId
+    value: VoteValue
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, VoteValue):
+            raise ValueError("Vote requires a validated VoteValue")
 
 
 class EpisodeStatus(Enum):
@@ -22,8 +40,8 @@ class Episode:
     specification section 20.2). Editing requires rechecking the protagonist and
     date against that same Trip. This aggregate does not store Trip membership.
 
-    COMPLETED is reserved for the future voting workflow; no manual completion
-    operation is exposed.
+    Completion occurs automatically with the final eligible vote; no manual
+    completion operation is exposed.
     """
 
     def __init__(
@@ -47,6 +65,9 @@ class Episode:
         self._description = description
         self._date = date
         self._status = EpisodeStatus.DRAFT
+        self._votes: dict[UserId, Vote] = {}
+        self._eligible_voters: Optional[frozenset[UserId]] = None
+        self._score: Optional[Decimal] = None
 
     @property
     def id(self) -> EpisodeId:
@@ -79,6 +100,58 @@ class Episode:
     @property
     def status(self) -> EpisodeStatus:
         return self._status
+
+    @property
+    def votes(self) -> tuple[Vote, ...]:
+        return tuple(self._votes.values())
+
+    @property
+    def score(self) -> Optional[Decimal]:
+        """Final arithmetic mean, absent until COMPLETED (FR-16)."""
+        return self._score
+
+    def has_vote_from(self, voter_id: UserId) -> bool:
+        return voter_id in self._votes
+
+    def cast_vote(
+        self,
+        vote_id: VoteId,
+        voter_id: UserId,
+        value: VoteValue,
+        *,
+        eligible_voters: Iterable[UserId],
+        trip_status: TripStatus,
+    ) -> Vote:
+        """Record a vote and complete when every eligible voter has voted.
+
+        The caller supplies this Trip's current status and locked participant
+        identities minus the protagonist, as in the voting sequence diagram.
+        The first accepted vote freezes that context for subsequent votes.
+        """
+        if self.status is not EpisodeStatus.VOTING:
+            raise ValueError("Episode must be VOTING to receive votes")
+        if trip_status is not TripStatus.ACTIVE:
+            raise ValueError("Voting requires an ACTIVE trip")
+        eligible = frozenset(eligible_voters)
+        if self.protagonist_id in eligible or voter_id == self.protagonist_id:
+            raise ValueError("The protagonist cannot be an eligible voter")
+        if voter_id not in eligible:
+            raise ValueError("Voter is not eligible for this episode")
+        if self._eligible_voters is not None and eligible != self._eligible_voters:
+            raise ValueError("Eligible voters cannot change during voting")
+        if self.has_vote_from(voter_id):
+            raise ValueError("User has already voted on this episode")
+        if any(vote.id == vote_id for vote in self._votes.values()):
+            raise ValueError("Vote identity is already in use")
+        vote = Vote(vote_id, self.id, voter_id, value)
+        self._eligible_voters = eligible
+        self._votes[voter_id] = vote
+        if self._votes.keys() == eligible:
+            self._score = Decimal(
+                sum(recorded.value.value for recorded in self._votes.values())
+            ) / Decimal(len(self._votes))
+            self._status = EpisodeStatus.COMPLETED
+        return vote
 
     def edit(
         self,
