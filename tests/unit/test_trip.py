@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 
-from sillycation.domain.identifiers import TripId, UserId
+from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
 from sillycation.domain.trip import Participant, Trip, TripStatus
 from sillycation.domain.value_objects import InvitationCode, TripPeriod
 
@@ -12,6 +12,11 @@ CREATOR = UserId("creator")
 GUEST = UserId("guest")
 START = date(2026, 10, 10)
 END = date(2026, 10, 15)
+
+
+def admit(trip, user_id, *, requested_by):
+    request = trip.request_to_join(JoinRequestId(user_id.value), user_id)
+    trip.approve_join_request(request.id, requested_by=requested_by)
 
 
 @pytest.fixture
@@ -77,7 +82,7 @@ def test_participant_identity_cannot_be_changed(attribute, value):
 
 
 def test_creator_can_add_participant_while_planned(trip):
-    trip.add_participant(GUEST, requested_by=CREATOR)
+    admit(trip, GUEST, requested_by=CREATOR)
     assert trip.participants == frozenset(
         {
             Participant(trip.id, CREATOR),
@@ -89,19 +94,19 @@ def test_creator_can_add_participant_while_planned(trip):
 
 @pytest.mark.parametrize("user_id", [CREATOR, GUEST])
 def test_duplicate_membership_is_rejected_without_changing_participants(trip, user_id):
-    trip.add_participant(GUEST, requested_by=CREATOR)
+    admit(trip, GUEST, requested_by=CREATOR)
     before = trip.participants
     with pytest.raises(ValueError):
-        trip.add_participant(user_id, requested_by=CREATOR)
+        admit(trip, user_id, requested_by=CREATOR)
     assert trip.participants == before
 
 
 @pytest.mark.parametrize("actor", [GUEST, UserId("outsider")])
 def test_only_creator_can_add_participants(trip, actor):
-    trip.add_participant(GUEST, requested_by=CREATOR)
+    admit(trip, GUEST, requested_by=CREATOR)
     before = trip.participants
     with pytest.raises(ValueError):
-        trip.add_participant(UserId("new-user"), requested_by=actor)
+        admit(trip, UserId("new-user"), requested_by=actor)
     assert trip.participants == before
 
 
@@ -109,7 +114,7 @@ def test_participant_collection_is_an_immutable_snapshot(trip):
     snapshot = trip.participants
     with pytest.raises(AttributeError):
         snapshot.clear()
-    trip.add_participant(GUEST, requested_by=CREATOR)
+    admit(trip, GUEST, requested_by=CREATOR)
     assert snapshot == frozenset({Participant(trip.id, CREATOR)})
     assert len(trip.participants) == 2
 
@@ -136,7 +141,7 @@ def test_aggregate_state_cannot_be_reassigned_directly(trip, attribute, value):
 
 @pytest.mark.parametrize("today", [START, END, date(2026, 10, 16)])
 def test_creator_can_activate_on_or_after_start_date(trip, today):
-    trip.add_participant(GUEST, requested_by=CREATOR)
+    admit(trip, GUEST, requested_by=CREATOR)
     before = trip.participants
     trip.activate(requested_by=CREATOR, current_date=today)
     assert trip.status is TripStatus.ACTIVE
@@ -144,7 +149,7 @@ def test_creator_can_activate_on_or_after_start_date(trip, today):
 
 
 def test_activation_before_start_date_is_rejected(trip):
-    trip.add_participant(GUEST, requested_by=CREATOR)
+    admit(trip, GUEST, requested_by=CREATOR)
     with pytest.raises(ValueError):
         trip.activate(requested_by=CREATOR, current_date=date(2026, 10, 9))
     assert trip.status is TripStatus.PLANNED
@@ -158,14 +163,14 @@ def test_activation_requires_at_least_two_participants(trip):
 
 @pytest.mark.parametrize("actor", [GUEST, UserId("outsider")])
 def test_only_creator_can_activate(trip, actor):
-    trip.add_participant(GUEST, requested_by=CREATOR)
+    admit(trip, GUEST, requested_by=CREATOR)
     with pytest.raises(ValueError):
         trip.activate(requested_by=actor, current_date=START)
     assert trip.status is TripStatus.PLANNED
 
 
 def test_active_trip_cannot_be_activated_again(trip):
-    trip.add_participant(GUEST, requested_by=CREATOR)
+    admit(trip, GUEST, requested_by=CREATOR)
     trip.activate(requested_by=CREATOR, current_date=START)
     with pytest.raises(ValueError):
         trip.activate(requested_by=CREATOR, current_date=START)
@@ -173,16 +178,16 @@ def test_active_trip_cannot_be_activated_again(trip):
 
 
 def test_active_trip_membership_is_locked(trip):
-    trip.add_participant(GUEST, requested_by=CREATOR)
+    admit(trip, GUEST, requested_by=CREATOR)
     trip.activate(requested_by=CREATOR, current_date=START)
     before = trip.participants
     with pytest.raises(ValueError):
-        trip.add_participant(UserId("late-guest"), requested_by=CREATOR)
+        admit(trip, UserId("late-guest"), requested_by=CREATOR)
     assert trip.participants == before
 
 
 def test_active_trip_cannot_return_to_planned(trip):
-    trip.add_participant(GUEST, requested_by=CREATOR)
+    admit(trip, GUEST, requested_by=CREATOR)
     trip.activate(requested_by=CREATOR, current_date=START)
     with pytest.raises(AttributeError):
         trip.status = TripStatus.PLANNED
@@ -193,5 +198,5 @@ def test_membership_is_owned_by_each_trip(trip):
     other = Trip(
         TripId("other"), "Other", CREATOR, TripPeriod(END, END), InvitationCode("other")
     )
-    trip.add_participant(GUEST, requested_by=CREATOR)
+    admit(trip, GUEST, requested_by=CREATOR)
     assert other.participants == frozenset({Participant(other.id, CREATOR)})

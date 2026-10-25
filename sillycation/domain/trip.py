@@ -1,11 +1,11 @@
 """Trip membership and the PLANNED to ACTIVE lifecycle transition."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import Enum
 from typing import Optional
 
-from sillycation.domain.identifiers import TripId, UserId
+from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
 from sillycation.domain.value_objects import InvitationCode, TripPeriod
 
 
@@ -14,6 +14,22 @@ class TripStatus(Enum):
     ACTIVE = "ACTIVE"
     COMPLETED = "COMPLETED"
     ARCHIVED = "ARCHIVED"
+
+
+class JoinRequestStatus(Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+@dataclass(frozen=True)
+class JoinRequest:
+    """Immutable snapshot of a request owned and updated by its Trip."""
+
+    id: JoinRequestId
+    trip_id: TripId
+    user_id: UserId
+    status: JoinRequestStatus = JoinRequestStatus.PENDING
 
 
 @dataclass(frozen=True)
@@ -48,6 +64,7 @@ class Trip:
         self._description = description
         self._status = TripStatus.PLANNED
         self._participants = {Participant(id, creator_id)}
+        self._join_requests: dict[JoinRequestId, JoinRequest] = {}
 
     @property
     def id(self) -> TripId:
@@ -81,18 +98,70 @@ class Trip:
     def participants(self) -> frozenset[Participant]:
         return frozenset(self._participants)
 
-    def add_participant(self, user_id: UserId, *, requested_by: UserId) -> None:
-        """Record an approved membership, only while PLANNED.
+    @property
+    def join_requests(self) -> tuple[JoinRequest, ...]:
+        """Return immutable snapshots; read again to observe later decisions."""
+        return tuple(self._join_requests.values())
 
-        Precondition: the join request has been approved and cross-trip conflicts
-        checked. This membership primitive does not implement that workflow.
+    def get_join_request(self, request_id: JoinRequestId) -> JoinRequest:
+        try:
+            return self._join_requests[request_id]
+        except KeyError:
+            raise ValueError("Join request does not belong to this trip") from None
+
+    def request_to_join(
+        self, request_id: JoinRequestId, user_id: UserId
+    ) -> JoinRequest:
+        """Create a pending request after invitation lookup and conflict checks.
+
+        The caller resolves the invitation code to this Trip and checks conflicts
+        with other trips, as specified by the join-trip sequence diagram.
         """
+        self._require_planned()
+        if Participant(self.id, user_id) in self._participants:
+            raise ValueError("User is already a participant of this trip")
+        if request_id in self._join_requests:
+            raise ValueError("Join request identity is already in use")
+        if any(
+            request.user_id == user_id and request.status is JoinRequestStatus.PENDING
+            for request in self._join_requests.values()
+        ):
+            raise ValueError("User already has a pending join request")
+        request = JoinRequest(request_id, self.id, user_id)
+        self._join_requests[request_id] = request
+        return request
+
+    def approve_join_request(
+        self, request_id: JoinRequestId, *, requested_by: UserId
+    ) -> None:
+        """Approve after the caller has re-checked cross-trip conflicts.
+
+        If a conflict exists, the caller must use reject_join_request instead.
+        """
+        request = self._require_pending_request(request_id, requested_by)
+        self._participants.add(Participant(self.id, request.user_id))
+        self._join_requests[request_id] = replace(
+            request, status=JoinRequestStatus.APPROVED
+        )
+
+    def reject_join_request(
+        self, request_id: JoinRequestId, *, requested_by: UserId
+    ) -> None:
+        """Reject by creator decision or upon a caller-reported trip conflict."""
+        request = self._require_pending_request(request_id, requested_by)
+        self._join_requests[request_id] = replace(
+            request, status=JoinRequestStatus.REJECTED
+        )
+
+    def _require_pending_request(
+        self, request_id: JoinRequestId, requested_by: UserId
+    ) -> JoinRequest:
         self._require_creator(requested_by)
         self._require_planned()
-        participant = Participant(self.id, user_id)
-        if participant in self._participants:
-            raise ValueError("User is already a participant of this trip")
-        self._participants.add(participant)
+        request = self.get_join_request(request_id)
+        if request.status is not JoinRequestStatus.PENDING:
+            raise ValueError("Join request must be PENDING for this operation")
+        return request
 
     def activate(self, *, requested_by: UserId, current_date: date) -> None:
         """Activate explicitly once the start date and minimum membership are met."""
