@@ -129,7 +129,9 @@ def creation_data():
     )
 
 
-def test_create_trip_persists_creator_membership_and_supplied_values(creation_data) -> None:
+def test_create_trip_persists_creator_membership_and_supplied_values(
+    creation_data,
+) -> None:
     trips = MemoryTrips()
     users = MemoryUsers()
     # Typed assignments verify that test doubles satisfy the production ports.
