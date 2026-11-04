@@ -1,7 +1,10 @@
 """Domain rules requiring information from multiple aggregates."""
 
-from typing import Iterable
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Iterable, Optional
 
+from sillycation.domain.episode import Episode, EpisodeStatus
 from sillycation.domain.identifiers import UserId
 from sillycation.domain.trip import Participant, Trip, TripStatus
 from sillycation.domain.value_objects import TripPeriod
@@ -26,3 +29,44 @@ class TripConflictService:
             and trip_period.overlaps(trip.period)
             for trip in existing_trips
         )
+
+
+@dataclass(frozen=True)
+class RankingEntry:
+    """A participant's current total and competition position."""
+
+    user_id: UserId
+    score: Decimal
+    position: int
+
+
+class RankingService:
+    """Calculate participant totals from completed Episodes (FR-17 and FR-18)."""
+
+    def calculate(
+        self, trip: Trip, episodes: Iterable[Episode]
+    ) -> tuple[RankingEntry, ...]:
+        totals = {participant.user_id: Decimal(0) for participant in trip.participants}
+        completed = (
+            episode
+            for episode in episodes
+            if episode.trip_id == trip.id and episode.status is EpisodeStatus.COMPLETED
+        )
+        # Fix accumulation order too: Decimal addition uses the current context.
+        for episode in sorted(completed, key=lambda item: item.id.value):
+            if episode.score is None:
+                raise ValueError("Completed episode has no score")
+            if episode.protagonist_id not in totals:
+                raise ValueError("Episode protagonist is not a Trip participant")
+            totals[episode.protagonist_id] += episode.score
+
+        ordered = sorted(totals.items(), key=lambda item: (-item[1], item[0].value))
+        entries = []
+        previous_score: Optional[Decimal] = None
+        position = 0
+        for index, (user_id, score) in enumerate(ordered, start=1):
+            if score != previous_score:
+                position = index
+            entries.append(RankingEntry(user_id, score, position))
+            previous_score = score
+        return tuple(entries)
