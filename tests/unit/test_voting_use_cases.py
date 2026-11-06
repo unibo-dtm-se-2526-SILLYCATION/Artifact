@@ -51,6 +51,9 @@ class MemoryTrips:
 
 
 class MemoryEpisodes:
+    def delete(self, episode_id: EpisodeId) -> None:
+        raise AssertionError("Voting must not delete Episode")
+
     def __init__(self, episode: Episode) -> None:
         self.stored = {episode.id: deepcopy(episode)}
         self.saved: list[EpisodeId] = []

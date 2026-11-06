@@ -51,6 +51,9 @@ class MemoryTrips:
 
 
 class MemoryEpisodes:
+    def delete(self, episode_id: EpisodeId) -> None:
+        raise AssertionError("Ranking must not delete Episode")
+
     def __init__(self, episodes: Sequence[Episode]) -> None:
         self.episodes = episodes
         self.queries: list[TripId] = []

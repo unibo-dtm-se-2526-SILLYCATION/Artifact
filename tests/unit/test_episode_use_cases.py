@@ -6,6 +6,7 @@ import pytest
 
 from sillycation.application.episode_use_cases import (
     CreateEpisode,
+    DeleteEpisode,
     EditEpisode,
     EpisodeApplicationError,
     SubmitEpisode,
@@ -52,6 +53,13 @@ class MemoryEpisodes:
     def __init__(self) -> None:
         self.stored: dict[EpisodeId, Episode] = {}
         self.saved: list[EpisodeId] = []
+        self.deleted: list[EpisodeId] = []
+
+    def delete(self, episode_id: EpisodeId) -> None:
+        self.deleted.append(episode_id)
+        if episode_id not in self.stored:
+            raise LookupError("Episode not found during delete")
+        del self.stored[episode_id]
 
     def get_by_id(self, episode_id: EpisodeId) -> Optional[Episode]:
         return deepcopy(self.stored.get(episode_id))
@@ -401,3 +409,137 @@ def test_technical_errors_propagate(
     assert error.value is failure
     assert episodes.saved == []
     assert {key: vars(value) for key, value in episodes.stored.items()} == before
+
+
+def test_delete_removes_only_target_and_second_attempt_fails(trips, episodes, draft):
+    other = Episode(
+        EpisodeId("other"),
+        draft.trip_id,
+        AUTHOR,
+        PROTAGONIST,
+        "Other",
+        "Description",
+        START,
+    )
+    episodes.stored[other.id] = other
+    trip_before = deepcopy(vars(trips.stored[draft.trip_id]))
+    other_before = deepcopy(vars(other))
+    use_case = DeleteEpisode(trips, episodes)
+    assert use_case.execute(episode_id=draft.id, requested_by=AUTHOR) is None
+    assert episodes.get_by_id(draft.id) is None
+    assert set(episodes.stored) == {other.id}
+    assert vars(episodes.stored[other.id]) == other_before
+    assert episodes.deleted == [draft.id]
+    assert episodes.saved == []
+    assert trips.lookups == [draft.trip_id]
+    assert vars(trips.stored[draft.trip_id]) == trip_before
+    with pytest.raises(LookupError, match="Episode"):
+        use_case.execute(episode_id=draft.id, requested_by=AUTHOR)
+    assert episodes.deleted == [draft.id]
+
+
+@pytest.mark.parametrize("missing", ["episode", "trip"])
+def test_delete_missing_aggregate_does_not_write(trips, episodes, draft, missing):
+    if missing == "episode":
+        episodes.stored.clear()
+    else:
+        trips.stored.clear()
+    with pytest.raises(LookupError):
+        DeleteEpisode(trips, episodes).execute(episode_id=draft.id, requested_by=AUTHOR)
+    assert episodes.deleted == []
+    assert episodes.saved == []
+    if missing == "episode":
+        assert trips.lookups == []
+    else:
+        assert vars(episodes.stored[draft.id]) == vars(draft)
+
+
+@pytest.mark.parametrize(
+    "status", [TripStatus.PLANNED, TripStatus.COMPLETED, TripStatus.ARCHIVED]
+)
+def test_delete_checks_owning_trip_state(trips, episodes, draft, status, monkeypatch):
+    # Reconstructed states follow the existing Episode use-case fixtures.
+    monkeypatch.setattr(trips.stored[draft.trip_id], "_status", status)
+    other = active_trip()
+    monkeypatch.setattr(other, "_id", TripId("other"))
+    trips.stored[other.id] = other
+    before = deepcopy(vars(trips.stored[draft.trip_id]))
+    with pytest.raises(EpisodeApplicationError, match="ACTIVE"):
+        DeleteEpisode(trips, episodes).execute(episode_id=draft.id, requested_by=AUTHOR)
+    assert trips.lookups == [draft.trip_id]
+    assert episodes.deleted == []
+    assert episodes.saved == []
+    assert vars(episodes.stored[draft.id]) == vars(draft)
+    assert vars(trips.stored[draft.trip_id]) == before
+
+
+@pytest.mark.parametrize("actor", [AUTHOR, UserId("outsider")])
+def test_delete_creator_has_no_privilege_over_another_authors_draft(
+    trips, episodes, actor
+):
+    # AUTHOR is the actual Trip creator; PROTAGONIST is another Participant.
+    episode = Episode(
+        EPISODE_ID, TripId("trip"), PROTAGONIST, AUTHOR, "Title", "Description", START
+    )
+    episodes.stored[episode.id] = episode
+    before = deepcopy(vars(episode))
+    with pytest.raises(ValueError, match="author"):
+        DeleteEpisode(trips, episodes).execute(
+            episode_id=episode.id, requested_by=actor
+        )
+    assert vars(episode) == before
+    assert episodes.deleted == []
+    assert episodes.saved == []
+
+
+@pytest.mark.parametrize(
+    "status", [EpisodeStatus.SUBMITTED, EpisodeStatus.VOTING, EpisodeStatus.COMPLETED]
+)
+def test_delete_rejects_non_draft_without_write(
+    trips, episodes, draft, status, monkeypatch
+):
+    # Same loaded-state fixture used by the existing edit/submit tests.
+    monkeypatch.setattr(episodes.stored[draft.id], "_status", status)
+    before = deepcopy(vars(episodes.stored[draft.id]))
+    with pytest.raises(ValueError, match="DRAFT"):
+        DeleteEpisode(trips, episodes).execute(episode_id=draft.id, requested_by=AUTHOR)
+    assert vars(episodes.stored[draft.id]) == before
+    assert episodes.deleted == []
+    assert episodes.saved == []
+
+
+@pytest.mark.parametrize("dependency", ["episode", "trip", "delete"])
+def test_delete_propagates_technical_errors(
+    trips, episodes, draft, dependency, monkeypatch
+):
+    error = RuntimeError("Storage unavailable")
+
+    def fail(*args, **kwargs):
+        raise error
+
+    target = trips if dependency == "trip" else episodes
+    monkeypatch.setattr(
+        target, "delete" if dependency == "delete" else "get_by_id", fail
+    )
+    with pytest.raises(RuntimeError) as caught:
+        DeleteEpisode(trips, episodes).execute(episode_id=draft.id, requested_by=AUTHOR)
+    assert caught.value is error
+    assert episodes.saved == []
+    assert episodes.deleted == []
+    assert vars(episodes.stored[draft.id]) == vars(draft)
+
+
+def test_episode_disappearing_during_delete_propagates_lookup_error(
+    trips, episodes, draft, monkeypatch
+):
+    original_delete = episodes.delete
+
+    def disappear_then_delete(episode_id):
+        del episodes.stored[episode_id]
+        original_delete(episode_id)
+
+    monkeypatch.setattr(episodes, "delete", disappear_then_delete)
+    with pytest.raises(LookupError, match="during delete"):
+        DeleteEpisode(trips, episodes).execute(episode_id=draft.id, requested_by=AUTHOR)
+    assert episodes.deleted == [draft.id]
+    assert episodes.saved == []
