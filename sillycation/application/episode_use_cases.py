@@ -1,4 +1,4 @@
-"""Episode creation, draft editing and submission through repository ports.
+"""Episode creation, draft editing/deletion and submission through repository ports.
 
 The caller supplies authenticated actor identities and allocated EpisodeIds.
 LookupError denotes missing aggregates; EpisodeApplicationError denotes
@@ -108,6 +108,24 @@ class EditEpisode:
             protagonist_id=protagonist_id,
         )
         return self._episodes.save(episode)
+
+
+class DeleteEpisode:
+    def __init__(self, trips: TripRepository, episodes: EpisodeRepository) -> None:
+        self._trips = trips
+        self._episodes = episodes
+
+    def execute(self, *, episode_id: EpisodeId, requested_by: UserId) -> None:
+        """Remove an author's draft after validating its owning Trip.
+
+        Repository failures propagate, including disappearance during deletion.
+        These preliminary checks do not provide concurrency guarantees.
+        """
+        episode = _get_episode(self._episodes, episode_id)
+        trip = _get_trip(self._trips, episode.trip_id)
+        _require_active(trip)
+        episode.ensure_deletable(requested_by=requested_by)
+        self._episodes.delete(episode.id)
 
 
 class SubmitEpisode:

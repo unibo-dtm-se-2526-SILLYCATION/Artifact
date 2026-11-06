@@ -182,6 +182,13 @@ class Episode:
         self._status = EpisodeStatus.SUBMITTED
         self._status = EpisodeStatus.VOTING
 
+    def ensure_deletable(self, *, requested_by: UserId) -> None:
+        """Authorize draft removal without changing this aggregate (FR-10).
+
+        The application checks the owning Trip is ACTIVE before deletion.
+        """
+        self._require_author_draft(requested_by)
+
     def _require_author_draft(self, requested_by: UserId) -> None:
         if requested_by != self.author_id:
             raise ValueError("Only the episode author may perform this operation")

@@ -1,10 +1,12 @@
+from copy import deepcopy
 from datetime import date
 
 import pytest
 
 from sillycation.domain.episode import Episode, EpisodeStatus
-from sillycation.domain.identifiers import EpisodeId, TripId, UserId
+from sillycation.domain.identifiers import EpisodeId, TripId, UserId, VoteId
 from sillycation.domain.trip import TripStatus
+from sillycation.domain.value_objects import VoteValue
 
 
 AUTHOR = UserId("author")
@@ -35,6 +37,37 @@ def test_creation_preserves_fields_and_starts_draft(episode, data):
     for field, value in data.items():
         assert getattr(episode, field) == value
     assert episode.status is EpisodeStatus.DRAFT
+
+
+def test_author_can_check_deletability_without_mutation(episode):
+    before = deepcopy(vars(episode))
+    assert episode.ensure_deletable(requested_by=AUTHOR) is None
+    assert vars(episode) == before
+
+
+@pytest.mark.parametrize("actor", [PROTAGONIST, UserId("creator"), UserId("outsider")])
+def test_non_author_cannot_delete(episode, actor):
+    before = deepcopy(vars(episode))
+    with pytest.raises(ValueError, match="author"):
+        episode.ensure_deletable(requested_by=actor)
+    assert vars(episode) == before
+
+
+@pytest.mark.parametrize("completed", [False, True])
+def test_voted_episode_cannot_be_deleted_or_changed(episode, completed):
+    episode.submit(requested_by=AUTHOR, trip_status=TripStatus.ACTIVE)
+    voters = {AUTHOR} if completed else {AUTHOR, UserId("other")}
+    episode.cast_vote(
+        VoteId("vote"),
+        AUTHOR,
+        VoteValue(4),
+        eligible_voters=voters,
+        trip_status=TripStatus.ACTIVE,
+    )
+    before = deepcopy(vars(episode))
+    with pytest.raises(ValueError, match="DRAFT"):
+        episode.ensure_deletable(requested_by=AUTHOR)
+    assert vars(episode) == before
 
 
 def test_author_can_also_be_protagonist(data):

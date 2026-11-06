@@ -58,6 +58,14 @@ class EpisodeRepository(Protocol):
 
     def save(self, episode: Episode) -> Episode: ...
 
+    def delete(self, episode_id: EpisodeId) -> None:
+        """Remove the entire aggregate, including owned objects.
+
+        Raise LookupError if absent at deletion time. A valid DRAFT has no Votes;
+        the caller must first authorize deletion and check the owning Trip.
+        """
+        ...
+
     def get_by_id(self, episode_id: EpisodeId) -> Optional[Episode]: ...
 
     def find_by_trip(self, trip_id: TripId) -> Sequence[Episode]:
