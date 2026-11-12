@@ -181,3 +181,38 @@ def test_errors_propagate_unchanged(source, monkeypatch):
             trip_id=trip.id, requested_by=CREATOR
         )
     assert caught.value is error
+
+
+@pytest.mark.parametrize("archived", [False, True])
+def test_final_ranking_preserved_and_access_restricted(archived):
+    trip = make_trip(True)
+    episode = Episode(
+        EpisodeId("final"), trip.id, CREATOR, MEMBER, "Title", "Description", DAY
+    )
+    episode.submit(requested_by=CREATOR, trip_status=trip.status)
+    episode.cast_vote(
+        VoteId("vote"),
+        CREATOR,
+        VoteValue(4),
+        eligible_voters={CREATOR},
+        trip_status=trip.status,
+    )
+    episodes = MemoryEpisodes([episode])
+    use_case = GetParticipantRanking(MemoryTrips(trip), episodes)
+    expected = (
+        RankingEntry(MEMBER, Decimal(4), 1),
+        RankingEntry(CREATOR, Decimal(0), 2),
+    )
+    assert use_case.execute(trip_id=trip.id, requested_by=MEMBER) == expected
+    trip.complete(requested_by=CREATOR, current_date=DAY, has_unresolved_episodes=False)
+    if archived:
+        trip.archive(requested_by=CREATOR)
+    before = deepcopy([vars(trip), vars(episode)])
+    for actor in (CREATOR, MEMBER):
+        assert use_case.execute(trip_id=trip.id, requested_by=actor) == expected
+    for actor in (PENDING, UserId("outsider")):
+        queries = list(episodes.queries)
+        with pytest.raises(PermissionError):
+            use_case.execute(trip_id=trip.id, requested_by=actor)
+        assert episodes.queries == queries
+    assert [vars(trip), vars(episode)] == before
