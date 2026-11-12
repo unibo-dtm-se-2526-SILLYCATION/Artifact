@@ -9,7 +9,11 @@ denotes cross-aggregate conflicts. Domain ValueError exceptions propagate intact
 from datetime import date
 from typing import Optional
 
-from sillycation.application.ports.repositories import TripRepository, UserRepository
+from sillycation.application.ports.repositories import (
+    EpisodeRepository,
+    TripRepository,
+    UserRepository,
+)
 from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
 from sillycation.domain.services import TripConflictService
 from sillycation.domain.trip import JoinRequest, Trip
@@ -145,4 +149,38 @@ class ActivateTrip:
     ) -> Trip:
         trip = _get_trip(self._trips, trip_id)
         trip.activate(requested_by=requested_by, current_date=current_date)
+        return self._trips.save(trip)
+
+
+class CompleteTrip:
+    def __init__(self, trips: TripRepository, episodes: EpisodeRepository) -> None:
+        self._trips = trips
+        self._episodes = episodes
+
+    def execute(
+        self, *, trip_id: TripId, requested_by: UserId, current_date: date
+    ) -> Trip:
+        """Complete using current unresolved Episodes, without modifying them.
+
+        The query and save do not provide an atomic concurrency guarantee.
+        Domain and technical repository errors propagate unchanged.
+        """
+        trip = _get_trip(self._trips, trip_id)
+        unresolved = self._episodes.find_unresolved_by_trip(trip.id)
+        trip.complete(
+            requested_by=requested_by,
+            current_date=current_date,
+            has_unresolved_episodes=bool(unresolved),
+        )
+        return self._trips.save(trip)
+
+
+class ArchiveTrip:
+    def __init__(self, trips: TripRepository) -> None:
+        self._trips = trips
+
+    def execute(self, *, trip_id: TripId, requested_by: UserId) -> Trip:
+        """Archive a completed Trip; its Episodes and ranking remain available."""
+        trip = _get_trip(self._trips, trip_id)
+        trip.archive(requested_by=requested_by)
         return self._trips.save(trip)

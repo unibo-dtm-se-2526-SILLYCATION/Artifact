@@ -4,19 +4,32 @@ from typing import Optional, Sequence
 
 import pytest
 
-from sillycation.application.ports.repositories import TripRepository, UserRepository
+from sillycation.application.ports.repositories import (
+    EpisodeRepository,
+    TripRepository,
+    UserRepository,
+)
 from sillycation.application.trip_use_cases import (
     ActivateTrip,
+    CompleteTrip,
+    ArchiveTrip,
     ApplicationError,
     ApproveJoinRequest,
     CreateTrip,
     RejectJoinRequest,
     RequestJoinTrip,
 )
-from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
+from sillycation.domain.episode import Episode, EpisodeStatus
+from sillycation.domain.identifiers import (
+    EpisodeId,
+    JoinRequestId,
+    TripId,
+    UserId,
+    VoteId,
+)
 from sillycation.domain.trip import JoinRequestStatus, Participant, Trip, TripStatus
 from sillycation.domain.user import User
-from sillycation.domain.value_objects import InvitationCode, TripPeriod
+from sillycation.domain.value_objects import InvitationCode, TripPeriod, VoteValue
 
 
 CREATOR = UserId("creator")
@@ -379,3 +392,192 @@ def test_activate_delegates_invariants_without_saving(trip, invalid):
         )
     assert trips.saved == []
     assert trips.stored[trip.id].status is trip.status
+
+
+class CompletionEpisodes:
+    def __init__(self, episodes: Sequence[Episode] = ()) -> None:
+        self.stored = list(episodes)
+        self.queries: list[TripId] = []
+
+    def find_unresolved_by_trip(self, trip_id: TripId) -> Sequence[Episode]:
+        self.queries.append(trip_id)
+        return [
+            deepcopy(e)
+            for e in self.stored
+            if e.trip_id == trip_id
+            and e.status
+            in (EpisodeStatus.DRAFT, EpisodeStatus.SUBMITTED, EpisodeStatus.VOTING)
+        ]
+
+    def save(self, episode: Episode) -> Episode:
+        raise AssertionError("Completion must not save Episodes")
+
+    def delete(self, episode_id: EpisodeId) -> None:
+        raise AssertionError("Completion must not delete Episodes")
+
+    def get_by_id(self, episode_id: EpisodeId) -> Optional[Episode]:
+        raise AssertionError("Unexpected lookup")
+
+    def find_by_trip(self, trip_id: TripId) -> Sequence[Episode]:
+        raise AssertionError("Unexpected listing")
+
+
+def lifecycle_trip(status=TripStatus.ACTIVE):
+    trip = make_trip()
+    if status is not TripStatus.PLANNED:
+        admit(trip)
+        trip.activate(requested_by=CREATOR, current_date=DAY)
+    if status in (TripStatus.COMPLETED, TripStatus.ARCHIVED):
+        trip.complete(
+            requested_by=CREATOR, current_date=END, has_unresolved_episodes=False
+        )
+    if status is TripStatus.ARCHIVED:
+        trip.archive(requested_by=CREATOR)
+    return trip
+
+
+def completion_episode(trip, completed=False):
+    episode = Episode(
+        EpisodeId("episode"), trip.id, CREATOR, APPLICANT, "Title", "Description", DAY
+    )
+    if completed:
+        episode.submit(requested_by=CREATOR, trip_status=trip.status)
+        episode.cast_vote(
+            VoteId("vote"),
+            CREATOR,
+            VoteValue(4),
+            eligible_voters={CREATOR},
+            trip_status=trip.status,
+        )
+    return episode
+
+
+@pytest.mark.parametrize("contents", ["empty", "completed", "foreign"])
+def test_complete_queries_correct_trip_and_persists(contents: str) -> None:
+    trip = lifecycle_trip()
+    episode = completion_episode(
+        make_trip("foreign") if contents == "foreign" else trip, contents == "completed"
+    )
+    episodes = CompletionEpisodes([] if contents == "empty" else [episode])
+    trips = MemoryTrips([trip, make_trip("unrelated")])
+    port: EpisodeRepository = episodes
+    before = deepcopy([vars(e) for e in episodes.stored])
+    result = CompleteTrip(trips, port).execute(
+        trip_id=trip.id, requested_by=CREATOR, current_date=END
+    )
+    assert result.status is TripStatus.COMPLETED
+    assert vars(trips.stored[trip.id]) == vars(result)
+    assert trips.stored[TripId("unrelated")].status is TripStatus.PLANNED
+    assert trips.saved == [trip.id]
+    assert episodes.queries == [trip.id]
+    assert [vars(e) for e in episodes.stored] == before
+
+
+@pytest.mark.parametrize(
+    "status", [EpisodeStatus.DRAFT, EpisodeStatus.SUBMITTED, EpisodeStatus.VOTING]
+)
+def test_unresolved_episodes_block_completion(status, monkeypatch):
+    trip = lifecycle_trip()
+    episode = completion_episode(trip)
+    if status is EpisodeStatus.VOTING:
+        episode.submit(requested_by=CREATOR, trip_status=trip.status)
+    elif status is EpisodeStatus.SUBMITTED:
+        # Existing loaded-state fixture pattern: SUBMITTED is transient.
+        monkeypatch.setattr(episode, "_status", status)
+    episodes = CompletionEpisodes([episode])
+    trips = MemoryTrips([trip])
+    before = deepcopy(vars(episode))
+    with pytest.raises(ValueError):
+        CompleteTrip(trips, episodes).execute(
+            trip_id=trip.id, requested_by=CREATOR, current_date=END
+        )
+    assert trips.saved == []
+    assert vars(trips.stored[trip.id]) == vars(trip)
+    assert vars(episode) == before
+
+
+def test_archive_persists_without_episode_dependency():
+    trip = lifecycle_trip(TripStatus.COMPLETED)
+    trips = MemoryTrips([trip])
+    result = ArchiveTrip(trips).execute(trip_id=trip.id, requested_by=CREATOR)
+    assert result.status is TripStatus.ARCHIVED
+    assert vars(trips.stored[trip.id]) == vars(result)
+    assert trips.saved == [trip.id]
+    assert result.participants == trip.participants
+
+
+@pytest.mark.parametrize(
+    "archive,invalid",
+    [
+        (False, "missing"),
+        (False, "actor"),
+        (False, "state"),
+        (False, "date"),
+        (True, "missing"),
+        (True, "actor"),
+        (True, "state"),
+    ],
+)
+def test_lifecycle_use_case_failures_do_not_save(archive, invalid):
+    trip = lifecycle_trip(
+        TripStatus.PLANNED
+        if invalid == "state"
+        else TripStatus.COMPLETED
+        if archive
+        else TripStatus.ACTIVE
+    )
+    trips = MemoryTrips([] if invalid == "missing" else [trip])
+    episodes = CompletionEpisodes()
+    args = dict(
+        trip_id=trip.id, requested_by=APPLICANT if invalid == "actor" else CREATOR
+    )
+    with pytest.raises(LookupError if invalid == "missing" else ValueError):
+        if archive:
+            ArchiveTrip(trips).execute(**args)
+        else:
+            CompleteTrip(trips, episodes).execute(
+                **args, current_date=DAY if invalid == "date" else END
+            )
+    assert trips.saved == []
+    if invalid == "missing":
+        assert episodes.queries == []
+    else:
+        assert vars(trips.stored[trip.id]) == vars(trip)
+
+
+@pytest.mark.parametrize(
+    "operation,dependency",
+    [
+        ("complete", "load"),
+        ("complete", "query"),
+        ("complete", "save"),
+        ("archive", "load"),
+        ("archive", "save"),
+    ],
+)
+def test_lifecycle_repository_errors_propagate(operation, dependency, monkeypatch):
+    trip = lifecycle_trip(
+        TripStatus.COMPLETED if operation == "archive" else TripStatus.ACTIVE
+    )
+    trips = MemoryTrips([trip])
+    episodes = CompletionEpisodes()
+    failure = RuntimeError("Storage unavailable")
+
+    def fail(*args, **kwargs):
+        raise failure
+
+    target = episodes if dependency == "query" else trips
+    method = {"load": "get_by_id", "query": "find_unresolved_by_trip", "save": "save"}[
+        dependency
+    ]
+    monkeypatch.setattr(target, method, fail)
+    with pytest.raises(RuntimeError) as caught:
+        if operation == "archive":
+            ArchiveTrip(trips).execute(trip_id=trip.id, requested_by=CREATOR)
+        else:
+            CompleteTrip(trips, episodes).execute(
+                trip_id=trip.id, requested_by=CREATOR, current_date=END
+            )
+    assert caught.value is failure
+    assert trips.saved == []
+    assert vars(trips.stored[trip.id]) == vars(trip)

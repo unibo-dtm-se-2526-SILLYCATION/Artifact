@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from datetime import date
 
@@ -200,3 +201,95 @@ def test_membership_is_owned_by_each_trip(trip):
     )
     admit(trip, GUEST, requested_by=CREATOR)
     assert other.participants == frozenset({Participant(other.id, CREATOR)})
+
+
+def reach_state(trip, status):
+    if status is TripStatus.PLANNED:
+        return
+    admit(trip, GUEST, requested_by=CREATOR)
+    trip.request_to_join(JoinRequestId("pending"), UserId("pending"))
+    trip.activate(requested_by=CREATOR, current_date=START)
+    if status in (TripStatus.COMPLETED, TripStatus.ARCHIVED):
+        trip.complete(
+            requested_by=CREATOR, current_date=END, has_unresolved_episodes=False
+        )
+    if status is TripStatus.ARCHIVED:
+        trip.archive(requested_by=CREATOR)
+
+
+@pytest.mark.parametrize("today", [END, date(2026, 10, 16)])
+def test_complete_at_or_after_end_preserves_game_data(trip, today):
+    reach_state(trip, TripStatus.ACTIVE)
+    before = deepcopy(vars(trip))
+    assert (
+        trip.complete(
+            requested_by=CREATOR, current_date=today, has_unresolved_episodes=False
+        )
+        is None
+    )
+    before["_status"] = TripStatus.COMPLETED
+    assert vars(trip) == before
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "early",
+        "unresolved",
+        "participant",
+        "outsider",
+        "planned",
+        "completed",
+        "archived",
+    ],
+)
+def test_complete_failure_does_not_mutate(trip, invalid):
+    status = {
+        "planned": TripStatus.PLANNED,
+        "completed": TripStatus.COMPLETED,
+        "archived": TripStatus.ARCHIVED,
+    }.get(invalid, TripStatus.ACTIVE)
+    reach_state(trip, status)
+    before = deepcopy(vars(trip))
+    actor = (
+        GUEST
+        if invalid == "participant"
+        else UserId("outsider")
+        if invalid == "outsider"
+        else CREATOR
+    )
+    with pytest.raises(ValueError):
+        trip.complete(
+            requested_by=actor,
+            current_date=START if invalid == "early" else END,
+            has_unresolved_episodes=invalid == "unresolved",
+        )
+    assert vars(trip) == before
+
+
+def test_archive_preserves_game_data(trip):
+    reach_state(trip, TripStatus.COMPLETED)
+    before = deepcopy(vars(trip))
+    assert trip.archive(requested_by=CREATOR) is None
+    before["_status"] = TripStatus.ARCHIVED
+    assert vars(trip) == before
+
+
+@pytest.mark.parametrize(
+    "status", [TripStatus.PLANNED, TripStatus.ACTIVE, TripStatus.ARCHIVED]
+)
+def test_archive_rejects_wrong_state_without_mutation(trip, status):
+    reach_state(trip, status)
+    before = deepcopy(vars(trip))
+    with pytest.raises(ValueError):
+        trip.archive(requested_by=CREATOR)
+    assert vars(trip) == before
+
+
+@pytest.mark.parametrize("actor", [GUEST, UserId("outsider")])
+def test_archive_requires_creator(trip, actor):
+    reach_state(trip, TripStatus.COMPLETED)
+    before = deepcopy(vars(trip))
+    with pytest.raises(ValueError):
+        trip.archive(requested_by=actor)
+    assert vars(trip) == before

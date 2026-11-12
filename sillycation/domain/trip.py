@@ -1,4 +1,4 @@
-"""Trip membership and the PLANNED to ACTIVE lifecycle transition."""
+"""Trip membership and explicit creator-controlled lifecycle transitions."""
 
 from dataclasses import dataclass, replace
 from datetime import date
@@ -172,6 +172,30 @@ class Trip:
         if len(self._participants) < 2:
             raise ValueError("Trip activation requires at least two participants")
         self._status = TripStatus.ACTIVE
+
+    def complete(
+        self,
+        *,
+        requested_by: UserId,
+        current_date: date,
+        has_unresolved_episodes: bool,
+    ) -> None:
+        """Complete after the caller queries this Trip's unresolved Episodes."""
+        self._require_creator(requested_by)
+        if self.status is not TripStatus.ACTIVE:
+            raise ValueError("Trip must be ACTIVE for completion")
+        if current_date < self.period.end_date:
+            raise ValueError("Trip cannot be completed before its end date")
+        if has_unresolved_episodes:
+            raise ValueError("Trip cannot be completed with unresolved Episodes")
+        self._status = TripStatus.COMPLETED
+
+    def archive(self, *, requested_by: UserId) -> None:
+        """Archive a completed Trip without changing its game data."""
+        self._require_creator(requested_by)
+        if self.status is not TripStatus.COMPLETED:
+            raise ValueError("Trip must be COMPLETED for archival")
+        self._status = TripStatus.ARCHIVED
 
     def _require_creator(self, requested_by: UserId) -> None:
         if requested_by != self.creator_id:
