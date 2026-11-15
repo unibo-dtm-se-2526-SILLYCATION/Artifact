@@ -69,6 +69,46 @@ class Episode:
         self._eligible_voters: Optional[frozenset[UserId]] = None
         self._score: Optional[Decimal] = None
 
+    @classmethod
+    def restore(
+        cls,
+        *,
+        id: EpisodeId,
+        trip_id: TripId,
+        author_id: UserId,
+        protagonist_id: UserId,
+        title: str,
+        description: str,
+        date: Date,
+        status: EpisodeStatus,
+        votes: Iterable[Vote],
+    ) -> "Episode":
+        """Rebuild an Episode from previously stored state, in any status.
+
+        Intended for repositories only: no lifecycle rule is re-applied, because
+        the state was valid when it was saved. New episodes use the constructor.
+        The score of a COMPLETED episode is recomputed from its votes.
+        """
+        episode = cls(id, trip_id, author_id, protagonist_id, title, description, date)
+        recorded = {vote.voter_id: vote for vote in votes}
+        if any(vote.episode_id != id for vote in recorded.values()):
+            raise ValueError("Stored votes must belong to this episode")
+        if status is EpisodeStatus.DRAFT and recorded:
+            raise ValueError("A stored DRAFT episode cannot have votes")
+        if status is EpisodeStatus.COMPLETED and not recorded:
+            raise ValueError("A stored COMPLETED episode must have votes")
+        episode._status = status
+        episode._votes = recorded
+        if status is EpisodeStatus.COMPLETED:
+            episode._eligible_voters = frozenset(recorded)
+            episode._score = episode._mean_vote()
+        return episode
+
+    def _mean_vote(self) -> Decimal:
+        return Decimal(
+            sum(vote.value.value for vote in self._votes.values())
+        ) / Decimal(len(self._votes))
+
     @property
     def id(self) -> EpisodeId:
         return self._id
@@ -147,9 +187,7 @@ class Episode:
         self._eligible_voters = eligible
         self._votes[voter_id] = vote
         if self._votes.keys() == eligible:
-            self._score = Decimal(
-                sum(recorded.value.value for recorded in self._votes.values())
-            ) / Decimal(len(self._votes))
+            self._score = self._mean_vote()
             self._status = EpisodeStatus.COMPLETED
         return vote
 

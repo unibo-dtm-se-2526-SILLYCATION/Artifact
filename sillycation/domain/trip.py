@@ -3,7 +3,7 @@
 from dataclasses import dataclass, replace
 from datetime import date
 from enum import Enum
-from typing import Optional
+from typing import Iterable, Optional
 
 from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
 from sillycation.domain.value_objects import InvitationCode, TripPeriod
@@ -65,6 +65,37 @@ class Trip:
         self._status = TripStatus.PLANNED
         self._participants = {Participant(id, creator_id)}
         self._join_requests: dict[JoinRequestId, JoinRequest] = {}
+
+    @classmethod
+    def restore(
+        cls,
+        *,
+        id: TripId,
+        name: str,
+        creator_id: UserId,
+        period: TripPeriod,
+        invitation_code: InvitationCode,
+        description: Optional[str],
+        status: TripStatus,
+        participants: Iterable[UserId],
+        join_requests: Iterable[JoinRequest],
+    ) -> "Trip":
+        """Rebuild a Trip from previously stored state, in any lifecycle status.
+
+        Intended for repositories only: no lifecycle rule is re-applied, because
+        the state was valid when it was saved. New trips use the constructor.
+        """
+        trip = cls(id, name, creator_id, period, invitation_code, description)
+        members = {Participant(id, user_id) for user_id in participants}
+        if Participant(id, creator_id) not in members:
+            raise ValueError("Stored participants must include the trip creator")
+        requests = {request.id: request for request in join_requests}
+        if any(request.trip_id != id for request in requests.values()):
+            raise ValueError("Stored join requests must belong to this trip")
+        trip._status = status
+        trip._participants = members
+        trip._join_requests = requests
+        return trip
 
     @property
     def id(self) -> TripId:
