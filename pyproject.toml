@@ -14,6 +14,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 # update the Python versions in .github/workflows/check.yml if you change this
 python = ">= 3.9.0 < 4.0.0"
+sqlalchemy = "^2.0"
 
 [tool.poetry.group.dev.dependencies]
 coverage = "^7.4.0"
