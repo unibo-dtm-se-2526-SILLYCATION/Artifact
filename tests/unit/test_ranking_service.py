@@ -147,7 +147,6 @@ def test_foreign_completed_inconsistent_episode_is_ignored(monkeypatch):
     trip = make_trip()
     episode = make_episode(trip, "foreign", "outsider", (4,) * 4)
     monkeypatch.setattr(episode, "_trip_id", TripId("other"))
-    monkeypatch.setattr(episode, "_score", None)
     assert all(
         entry.score == 0 for entry in RankingService().calculate(trip, [episode])
     )
@@ -165,7 +164,8 @@ def test_inconsistent_completed_episode_is_rejected_without_mutation(
         (4,) * (3 if missing_score else 4),
     )
     if missing_score:
-        monkeypatch.setattr(episode, "_score", None)
+        # The score is derived from the votes, so simulate its absence.
+        monkeypatch.setattr(Episode, "score", None)
     before = deepcopy([vars(trip), vars(episode)])
     with pytest.raises(ValueError, match="score|protagonist"):
         RankingService().calculate(trip, [episode])
