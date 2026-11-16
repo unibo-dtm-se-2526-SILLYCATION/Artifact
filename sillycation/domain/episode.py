@@ -66,8 +66,6 @@ class Episode:
         self._date = date
         self._status = EpisodeStatus.DRAFT
         self._votes: dict[UserId, Vote] = {}
-        self._eligible_voters: Optional[frozenset[UserId]] = None
-        self._score: Optional[Decimal] = None
 
     @classmethod
     def restore(
@@ -87,7 +85,7 @@ class Episode:
 
         Intended for repositories only: no lifecycle rule is re-applied, because
         the state was valid when it was saved. New episodes use the constructor.
-        The score of a COMPLETED episode is recomputed from its votes.
+        The score is not stored: it is always computed from the votes.
         """
         episode = cls(id, trip_id, author_id, protagonist_id, title, description, date)
         recorded = {vote.voter_id: vote for vote in votes}
@@ -99,15 +97,7 @@ class Episode:
             raise ValueError("A stored COMPLETED episode must have votes")
         episode._status = status
         episode._votes = recorded
-        if status is EpisodeStatus.COMPLETED:
-            episode._eligible_voters = frozenset(recorded)
-            episode._score = episode._mean_vote()
         return episode
-
-    def _mean_vote(self) -> Decimal:
-        return Decimal(
-            sum(vote.value.value for vote in self._votes.values())
-        ) / Decimal(len(self._votes))
 
     @property
     def id(self) -> EpisodeId:
@@ -147,8 +137,11 @@ class Episode:
 
     @property
     def score(self) -> Optional[Decimal]:
-        """Final arithmetic mean, absent until COMPLETED (FR-16)."""
-        return self._score
+        """Arithmetic mean of the votes, absent until COMPLETED (FR-16)."""
+        if self._status is not EpisodeStatus.COMPLETED:
+            return None
+        total = sum(vote.value.value for vote in self._votes.values())
+        return Decimal(total) / Decimal(len(self._votes))
 
     def has_vote_from(self, voter_id: UserId) -> bool:
         return voter_id in self._votes
@@ -166,7 +159,8 @@ class Episode:
 
         The caller supplies this Trip's current status and locked participant
         identities minus the protagonist, as in the voting sequence diagram.
-        The first accepted vote freezes that context for subsequent votes.
+        Membership is locked while the Trip is ACTIVE, so this set is the same
+        for every vote and does not need to be stored here.
         """
         if self.status is not EpisodeStatus.VOTING:
             raise ValueError("Episode must be VOTING to receive votes")
@@ -177,17 +171,13 @@ class Episode:
             raise ValueError("The protagonist cannot be an eligible voter")
         if voter_id not in eligible:
             raise ValueError("Voter is not eligible for this episode")
-        if self._eligible_voters is not None and eligible != self._eligible_voters:
-            raise ValueError("Eligible voters cannot change during voting")
         if self.has_vote_from(voter_id):
             raise ValueError("User has already voted on this episode")
         if any(vote.id == vote_id for vote in self._votes.values()):
             raise ValueError("Vote identity is already in use")
         vote = Vote(vote_id, self.id, voter_id, value)
-        self._eligible_voters = eligible
         self._votes[voter_id] = vote
         if self._votes.keys() == eligible:
-            self._score = self._mean_vote()
             self._status = EpisodeStatus.COMPLETED
         return vote
 

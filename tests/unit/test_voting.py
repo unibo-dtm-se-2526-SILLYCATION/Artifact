@@ -173,25 +173,6 @@ def test_invalid_eligible_context_does_not_record_vote(episode, eligible):
     assert episode.status is EpisodeStatus.VOTING
 
 
-@pytest.mark.parametrize("changed", [{OTHER}, ELIGIBLE | {UserId("extra")}])
-def test_eligible_set_cannot_change_during_voting(episode, changed):
-    cast(episode)
-    with pytest.raises(ValueError):
-        cast(episode, voter=OTHER, vote_id="second", eligible=changed)
-    assert len(episode.votes) == 1
-    assert episode.score is None
-    cast(episode, voter=OTHER, vote_id="second")
-    assert episode.status is EpisodeStatus.COMPLETED
-
-
-def test_caller_cannot_mutate_stored_eligible_set(episode):
-    supplied = set(ELIGIBLE)
-    cast(episode, eligible=supplied)
-    supplied.clear()
-    cast(episode, voter=OTHER, vote_id="second", eligible=set(ELIGIBLE))
-    assert episode.status is EpisodeStatus.COMPLETED
-
-
 def test_votes_and_score_cannot_be_modified_externally(episode):
     cast(episode)
     snapshot = episode.votes
