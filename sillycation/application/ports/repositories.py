@@ -61,7 +61,7 @@ class EpisodeRepository(Protocol):
     def delete(self, episode_id: EpisodeId) -> None:
         """Remove the entire aggregate, including owned objects.
 
-        Raise LookupError if absent at deletion time. A valid DRAFT has no Votes;
+        Raise NotFound if absent at deletion time. A valid DRAFT has no Votes;
         the caller must first authorize deletion and check the owning Trip.
         """
         ...

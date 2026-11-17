@@ -1,49 +1,56 @@
 """Episode creation, draft editing/deletion and submission through repository ports.
 
 The caller supplies authenticated actor identities and allocated EpisodeIds.
-LookupError denotes missing aggregates; EpisodeApplicationError denotes
-application preconditions. Domain ValueError and repository failures propagate.
+Errors are the classes of sillycation.domain.errors; repository failures propagate.
 """
 
 from datetime import date as Date
 
 from sillycation.application.ports.repositories import EpisodeRepository, TripRepository
 from sillycation.domain.episode import Episode
+from sillycation.domain.errors import (
+    Duplicate,
+    InvalidData,
+    InvalidState,
+    NotAuthorized,
+    NotFound,
+)
 from sillycation.domain.identifiers import EpisodeId, TripId, UserId
 from sillycation.domain.trip import Participant, Trip, TripStatus
-
-
-class EpisodeApplicationError(Exception):
-    """An Episode workflow fails an application precondition."""
 
 
 def _get_trip(trips: TripRepository, trip_id: TripId) -> Trip:
     trip = trips.get_by_id(trip_id)
     if trip is None:
-        raise LookupError("Trip not found")
+        raise NotFound("Trip not found")
     return trip
 
 
 def _get_episode(episodes: EpisodeRepository, episode_id: EpisodeId) -> Episode:
     episode = episodes.get_by_id(episode_id)
     if episode is None:
-        raise LookupError("Episode not found")
+        raise NotFound("Episode not found")
     return episode
 
 
 def _require_active(trip: Trip) -> None:
     if trip.status is not TripStatus.ACTIVE:
-        raise EpisodeApplicationError("Trip must be ACTIVE")
+        raise InvalidState("Trip must be ACTIVE")
 
 
 def _require_participant(trip: Trip, user_id: UserId) -> None:
     if Participant(trip.id, user_id) not in trip.participants:
-        raise EpisodeApplicationError("User must be a participant of this Trip")
+        raise NotAuthorized("User must be a participant of this Trip")
+
+
+def _require_protagonist(trip: Trip, protagonist_id: UserId) -> None:
+    if Participant(trip.id, protagonist_id) not in trip.participants:
+        raise InvalidData("Protagonist must be a participant of this Trip")
 
 
 def _require_date(trip: Trip, date: Date) -> None:
     if not trip.period.start_date <= date <= trip.period.end_date:
-        raise EpisodeApplicationError("Episode date must fall within the Trip period")
+        raise InvalidData("Episode date must fall within the Trip period")
 
 
 class CreateEpisode:
@@ -67,11 +74,11 @@ class CreateEpisode:
         The identity lookup is preliminary, not an atomic uniqueness guarantee.
         """
         if self._episodes.get_by_id(episode_id) is not None:
-            raise EpisodeApplicationError("Episode identity already exists")
+            raise Duplicate("Episode identity already exists")
         trip = _get_trip(self._trips, trip_id)
         _require_active(trip)
         _require_participant(trip, author_id)
-        _require_participant(trip, protagonist_id)
+        _require_protagonist(trip, protagonist_id)
         _require_date(trip, date)
         episode = Episode(
             episode_id, trip.id, author_id, protagonist_id, title, description, date
@@ -98,7 +105,7 @@ class EditEpisode:
         episode = _get_episode(self._episodes, episode_id)
         trip = _get_trip(self._trips, episode.trip_id)
         _require_active(trip)
-        _require_participant(trip, protagonist_id)
+        _require_protagonist(trip, protagonist_id)
         _require_date(trip, date)
         episode.edit(
             requested_by=requested_by,

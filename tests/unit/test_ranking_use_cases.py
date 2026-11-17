@@ -8,6 +8,7 @@ import pytest
 from sillycation.application.ports.repositories import EpisodeRepository, TripRepository
 from sillycation.application.ranking_use_cases import GetParticipantRanking
 from sillycation.domain.episode import Episode
+from sillycation.domain.errors import NotAuthorized, NotFound
 from sillycation.domain.identifiers import (
     EpisodeId,
     JoinRequestId,
@@ -136,7 +137,7 @@ def test_non_members_rejected_before_loading_episodes(requester):
     trip = make_trip()
     episodes = MemoryEpisodes([])
     before = deepcopy(vars(trip))
-    with pytest.raises(PermissionError):
+    with pytest.raises(NotAuthorized):
         GetParticipantRanking(MemoryTrips(trip), episodes).execute(
             trip_id=trip.id, requested_by=requester
         )
@@ -147,7 +148,7 @@ def test_non_members_rejected_before_loading_episodes(requester):
 def test_missing_trip():
     trip = make_trip()
     episodes = MemoryEpisodes([])
-    with pytest.raises(LookupError, match="Trip"):
+    with pytest.raises(NotFound, match="Trip"):
         GetParticipantRanking(MemoryTrips(trip), episodes).execute(
             trip_id=TripId("missing"), requested_by=CREATOR
         )
@@ -212,7 +213,7 @@ def test_final_ranking_preserved_and_access_restricted(archived):
         assert use_case.execute(trip_id=trip.id, requested_by=actor) == expected
     for actor in (PENDING, UserId("outsider")):
         queries = list(episodes.queries)
-        with pytest.raises(PermissionError):
+        with pytest.raises(NotAuthorized):
             use_case.execute(trip_id=trip.id, requested_by=actor)
         assert episodes.queries == queries
     assert [vars(trip), vars(episode)] == before

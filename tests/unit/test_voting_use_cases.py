@@ -8,6 +8,13 @@ import pytest
 from sillycation.application.ports.repositories import EpisodeRepository, TripRepository
 from sillycation.application.voting_use_cases import CastVote
 from sillycation.domain.episode import Episode, EpisodeStatus
+from sillycation.domain.errors import (
+    Duplicate,
+    InvalidData,
+    InvalidState,
+    NotAuthorized,
+    NotFound,
+)
 from sillycation.domain.identifiers import (
     EpisodeId,
     JoinRequestId,
@@ -168,7 +175,7 @@ def test_valid_values_are_persisted(trips, episodes, data, value):
 
 @pytest.mark.parametrize("voter", [PROTAGONIST, UserId("outsider"), PENDING])
 def test_ineligible_voter_rejected_without_save(trips, episodes, episode, data, voter):
-    with pytest.raises(ValueError):
+    with pytest.raises(NotAuthorized):
         CastVote(trips, episodes).execute(**{**data, "voter_id": voter})
     assert episodes.saved == []
     assert vars(episodes.stored[episode.id]) == vars(episode)
@@ -176,7 +183,7 @@ def test_ineligible_voter_rejected_without_save(trips, episodes, episode, data, 
 
 @pytest.mark.parametrize("value", [0, 6, 2.5, 4.0, True, False, "4"])
 def test_invalid_values_are_not_coerced(trips, episodes, episode, data, value):
-    with pytest.raises(ValueError, match="integer"):
+    with pytest.raises(InvalidData, match="integer"):
         CastVote(trips, episodes).execute(**{**data, "value": value})
     assert episodes.saved == []
     assert vars(episodes.stored[episode.id]) == vars(episode)
@@ -224,7 +231,7 @@ def test_duplicates_do_not_replace_persisted_vote(trips, episodes, data, duplica
     changes = (
         {"vote_id": VoteId("new")} if duplicate == "voter" else {"voter_id": OTHER}
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(Duplicate):
         use_case.execute(**{**data, **changes, "value": 1})
     assert episodes.saved == []
     assert vars(episodes.stored[first.id]) == vars(first)
@@ -237,7 +244,7 @@ def test_completed_episode_rejects_further_votes(trips, episodes, data):
         **{**data, "vote_id": VoteId("last"), "voter_id": OTHER}
     )
     episodes.saved.clear()
-    with pytest.raises(ValueError, match="VOTING"):
+    with pytest.raises(InvalidState, match="VOTING"):
         use_case.execute(**{**data, "vote_id": VoteId("late")})
     assert episodes.saved == []
     assert vars(episodes.stored[completed.id]) == vars(completed)
@@ -246,7 +253,7 @@ def test_completed_episode_rejects_further_votes(trips, episodes, data):
 def test_draft_episode_rejects_vote(trip, trips, data):
     draft = make_episode(trip, submitted=False)
     episodes = MemoryEpisodes(draft)
-    with pytest.raises(ValueError, match="VOTING"):
+    with pytest.raises(InvalidState, match="VOTING"):
         CastVote(trips, episodes).execute(**data)
     assert episodes.saved == []
     assert vars(episodes.stored[draft.id]) == vars(draft)
@@ -267,7 +274,7 @@ def test_non_active_owning_trip_rejects_vote(episodes, episode, data):
     other.approve_join_request(request.id, requested_by=AUTHOR)
     other.activate(requested_by=AUTHOR, current_date=DAY)
     trips.stored[other.id] = other
-    with pytest.raises(ValueError, match="ACTIVE"):
+    with pytest.raises(InvalidState, match="ACTIVE"):
         CastVote(trips, episodes).execute(**data)
     assert trips.lookups == [episode.trip_id]
     assert episodes.saved == []
@@ -277,7 +284,7 @@ def test_non_active_owning_trip_rejects_vote(episodes, episode, data):
 @pytest.mark.parametrize("missing", ["Episode", "Trip"])
 def test_missing_aggregate_is_explicit(trips, episodes, data, missing):
     (episodes if missing == "Episode" else trips).stored.clear()
-    with pytest.raises(LookupError, match=missing):
+    with pytest.raises(NotFound, match=missing):
         CastVote(trips, episodes).execute(**data)
     assert episodes.saved == []
     if missing == "Episode":

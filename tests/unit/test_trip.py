@@ -4,6 +4,12 @@ from datetime import date
 
 import pytest
 
+from sillycation.domain.errors import (
+    Duplicate,
+    InvalidData,
+    InvalidState,
+    NotAuthorized,
+)
 from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
 from sillycation.domain.trip import Participant, Trip, TripStatus
 from sillycation.domain.value_objects import InvitationCode, TripPeriod
@@ -56,7 +62,7 @@ def test_trip_can_have_description_and_single_day_period():
 
 
 def test_invalid_dates_are_rejected_by_trip_period():
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         Trip(
             TripId("trip"),
             "Holiday",
@@ -97,7 +103,7 @@ def test_creator_can_add_participant_while_planned(trip):
 def test_duplicate_membership_is_rejected_without_changing_participants(trip, user_id):
     admit(trip, GUEST, requested_by=CREATOR)
     before = trip.participants
-    with pytest.raises(ValueError):
+    with pytest.raises(Duplicate):
         admit(trip, user_id, requested_by=CREATOR)
     assert trip.participants == before
 
@@ -106,7 +112,7 @@ def test_duplicate_membership_is_rejected_without_changing_participants(trip, us
 def test_only_creator_can_add_participants(trip, actor):
     admit(trip, GUEST, requested_by=CREATOR)
     before = trip.participants
-    with pytest.raises(ValueError):
+    with pytest.raises(NotAuthorized):
         admit(trip, UserId("new-user"), requested_by=actor)
     assert trip.participants == before
 
@@ -151,13 +157,13 @@ def test_creator_can_activate_on_or_after_start_date(trip, today):
 
 def test_activation_before_start_date_is_rejected(trip):
     admit(trip, GUEST, requested_by=CREATOR)
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         trip.activate(requested_by=CREATOR, current_date=date(2026, 10, 9))
     assert trip.status is TripStatus.PLANNED
 
 
 def test_activation_requires_at_least_two_participants(trip):
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         trip.activate(requested_by=CREATOR, current_date=START)
     assert trip.status is TripStatus.PLANNED
 
@@ -165,7 +171,7 @@ def test_activation_requires_at_least_two_participants(trip):
 @pytest.mark.parametrize("actor", [GUEST, UserId("outsider")])
 def test_only_creator_can_activate(trip, actor):
     admit(trip, GUEST, requested_by=CREATOR)
-    with pytest.raises(ValueError):
+    with pytest.raises(NotAuthorized):
         trip.activate(requested_by=actor, current_date=START)
     assert trip.status is TripStatus.PLANNED
 
@@ -173,7 +179,7 @@ def test_only_creator_can_activate(trip, actor):
 def test_active_trip_cannot_be_activated_again(trip):
     admit(trip, GUEST, requested_by=CREATOR)
     trip.activate(requested_by=CREATOR, current_date=START)
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         trip.activate(requested_by=CREATOR, current_date=START)
     assert trip.status is TripStatus.ACTIVE
 
@@ -182,7 +188,7 @@ def test_active_trip_membership_is_locked(trip):
     admit(trip, GUEST, requested_by=CREATOR)
     trip.activate(requested_by=CREATOR, current_date=START)
     before = trip.participants
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         admit(trip, UserId("late-guest"), requested_by=CREATOR)
     assert trip.participants == before
 
@@ -258,7 +264,8 @@ def test_complete_failure_does_not_mutate(trip, invalid):
         if invalid == "outsider"
         else CREATOR
     )
-    with pytest.raises(ValueError):
+    expected = NotAuthorized if invalid in ("participant", "outsider") else InvalidState
+    with pytest.raises(expected):
         trip.complete(
             requested_by=actor,
             current_date=START if invalid == "early" else END,
@@ -281,7 +288,7 @@ def test_archive_preserves_game_data(trip):
 def test_archive_rejects_wrong_state_without_mutation(trip, status):
     reach_state(trip, status)
     before = deepcopy(vars(trip))
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         trip.archive(requested_by=CREATOR)
     assert vars(trip) == before
 
@@ -290,6 +297,6 @@ def test_archive_rejects_wrong_state_without_mutation(trip, status):
 def test_archive_requires_creator(trip, actor):
     reach_state(trip, TripStatus.COMPLETED)
     before = deepcopy(vars(trip))
-    with pytest.raises(ValueError):
+    with pytest.raises(NotAuthorized):
         trip.archive(requested_by=actor)
     assert vars(trip) == before

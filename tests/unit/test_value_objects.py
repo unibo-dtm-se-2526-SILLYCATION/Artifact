@@ -3,6 +3,7 @@ from datetime import date
 
 import pytest
 
+from sillycation.domain.errors import InvalidData
 from sillycation.domain.value_objects import InvitationCode, TripPeriod, VoteValue
 
 
@@ -19,7 +20,7 @@ def test_valid_trip_period(start, end):
 
 
 def test_reversed_trip_period_is_rejected():
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         TripPeriod(day(5), day(1))
 
 
@@ -62,7 +63,7 @@ def test_valid_vote_value(value):
 
 @pytest.mark.parametrize("value", [-1, 0, 6, 100, 2.5, 1.0, "3", True, False, None])
 def test_invalid_vote_value_is_rejected(value):
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         VoteValue(value)
 
 

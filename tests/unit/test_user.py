@@ -2,6 +2,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from sillycation.domain.errors import InvalidData
 from sillycation.domain.identifiers import UserId
 from sillycation.domain.user import User
 
@@ -28,13 +29,13 @@ def test_valid_creation_preserves_documented_attributes(data):
 @pytest.mark.parametrize("value", ["", "   ", "\t\n", None])
 def test_required_text_cannot_be_missing_or_blank(data, field, value):
     data[field] = value
-    with pytest.raises(ValueError, match=field):
+    with pytest.raises(InvalidData, match=field):
         User(**data)
 
 
 def test_identity_is_required(data):
     data["id"] = None
-    with pytest.raises(ValueError, match="identity"):
+    with pytest.raises(InvalidData, match="identity"):
         User(**data)
 
 
