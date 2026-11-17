@@ -2,6 +2,7 @@ from datetime import date
 
 import pytest
 
+from sillycation.domain.errors import Duplicate, InvalidState, NotAuthorized, NotFound
 from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
 from sillycation.domain.trip import JoinRequestStatus, Participant, Trip
 from sillycation.domain.value_objects import InvitationCode, TripPeriod
@@ -42,7 +43,7 @@ def test_request_is_pending_and_does_not_grant_membership(trip):
 
 
 def test_duplicate_pending_request_is_rejected(trip, pending):
-    with pytest.raises(ValueError):
+    with pytest.raises(Duplicate):
         trip.request_to_join(JoinRequestId("another"), APPLICANT)
     assert trip.join_requests == (pending,)
 
@@ -54,7 +55,7 @@ def test_request_id_cannot_be_reused(trip, pending, decision):
     if decision:
         getattr(trip, decision)(REQUEST_ID, requested_by=CREATOR)
     before = trip.join_requests
-    with pytest.raises(ValueError):
+    with pytest.raises(Duplicate):
         trip.request_to_join(REQUEST_ID, UserId("another-user"))
     assert trip.join_requests == before
     assert trip.get_join_request(REQUEST_ID).user_id == APPLICANT
@@ -97,7 +98,7 @@ def test_decided_request_cannot_be_decided_again(trip, pending, first, second):
     getattr(trip, first)(REQUEST_ID, requested_by=CREATOR)
     status = trip.get_join_request(REQUEST_ID).status
     members = trip.participants
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         getattr(trip, second)(REQUEST_ID, requested_by=CREATOR)
     assert trip.get_join_request(REQUEST_ID).status is status
     assert trip.participants == members
@@ -109,7 +110,7 @@ def test_only_creator_can_decide_request(trip, pending, decision, actor):
     member_request = trip.request_to_join(JoinRequestId("member"), UserId("member"))
     trip.approve_join_request(member_request.id, requested_by=CREATOR)
     before = trip.participants
-    with pytest.raises(ValueError):
+    with pytest.raises(NotAuthorized):
         getattr(trip, decision)(REQUEST_ID, requested_by=actor)
     assert trip.get_join_request(REQUEST_ID).status is JoinRequestStatus.PENDING
     assert trip.participants == before
@@ -126,7 +127,7 @@ def test_requests_cannot_be_created_or_decided_after_activation(
     trip.activate(requested_by=CREATOR, current_date=TODAY)
     requests = trip.join_requests
     members = trip.participants
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         if operation == "request":
             trip.request_to_join(JoinRequestId("late"), UserId("late"))
         else:
@@ -148,7 +149,7 @@ def test_unknown_or_other_trip_request_is_rejected(trip, operation):
         InvitationCode("other"),
     )
     other.request_to_join(REQUEST_ID, APPLICANT)
-    with pytest.raises(ValueError):
+    with pytest.raises(NotFound):
         if operation == "get_join_request":
             trip.get_join_request(REQUEST_ID)
         else:

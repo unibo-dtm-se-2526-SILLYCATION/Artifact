@@ -8,6 +8,7 @@ from sqlalchemy import Engine
 from sillycation.adapters.persistence.database import create_database
 from sillycation.adapters.persistence.trip_repository import SqlAlchemyTripRepository
 from sillycation.application.ports.repositories import TripRepository
+from sillycation.domain.errors import InvalidState
 from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
 from sillycation.domain.trip import (
     JoinRequest,
@@ -132,7 +133,7 @@ def test_loaded_trip_still_enforces_its_rules(trips: TripRepository) -> None:
     loaded = trips.get_by_id(TripId("trip"))
 
     assert loaded is not None
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         loaded.request_to_join(JoinRequestId("late"), APPLICANT)
 
 

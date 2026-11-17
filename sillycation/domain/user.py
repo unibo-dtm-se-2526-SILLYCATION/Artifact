@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 
+from sillycation.domain.errors import InvalidData
 from sillycation.domain.identifiers import UserId
 
 
@@ -21,8 +22,8 @@ class User:
 
     def __post_init__(self) -> None:
         if self.id is None:
-            raise ValueError("User identity is required")
+            raise InvalidData("User identity is required")
         for name in ("username", "email", "password_hash"):
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"User {name} is required")
+                raise InvalidData(f"User {name} is required")

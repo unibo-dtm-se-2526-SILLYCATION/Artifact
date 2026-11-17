@@ -6,10 +6,9 @@ from sillycation.application.ports.passwords import PasswordHasher
 from sillycation.application.ports.repositories import UserRepository
 from sillycation.application.user_use_cases import (
     AuthenticateUser,
-    DuplicateUserError,
-    InvalidCredentialsError,
     RegisterUser,
 )
+from sillycation.domain.errors import Duplicate, InvalidData, NotAuthorized
 from sillycation.domain.identifiers import UserId
 from sillycation.domain.user import User
 
@@ -113,7 +112,7 @@ def test_duplicates_are_rejected_before_hashing_or_saving(users, hasher, data, f
     users.users[existing.id] = existing
     data[field] = existing.id if field == "user_id" else getattr(existing, field)
     before = dict(users.users)
-    with pytest.raises(DuplicateUserError) as error:
+    with pytest.raises(Duplicate) as error:
         RegisterUser(users, hasher).execute(**data)
     assert users.users == before
     assert users.saved == []
@@ -125,7 +124,7 @@ def test_duplicates_are_rejected_before_hashing_or_saving(users, hasher, data, f
 @pytest.mark.parametrize("password", ["", "   ", "\t\n", None])
 def test_registration_rejects_missing_or_blank_password(users, hasher, data, password):
     data["password"] = password
-    with pytest.raises(ValueError, match="Password"):
+    with pytest.raises(InvalidData, match="Password"):
         RegisterUser(users, hasher).execute(**data)
     assert users.saved == []
     assert hasher.hash_calls == []
@@ -137,14 +136,14 @@ def test_registration_delegates_required_fields_to_user(
     users, hasher, data, field, value
 ):
     data[field] = value
-    with pytest.raises(ValueError, match=field):
+    with pytest.raises(InvalidData, match=field):
         RegisterUser(users, hasher).execute(**data)
     assert users.saved == []
 
 
 def test_registration_requires_identity(users, hasher, data):
     data["user_id"] = None
-    with pytest.raises(ValueError, match="identity"):
+    with pytest.raises(InvalidData, match="identity"):
         RegisterUser(users, hasher).execute(**data)
     assert users.saved == []
 
@@ -152,7 +151,7 @@ def test_registration_requires_identity(users, hasher, data):
 @pytest.mark.parametrize("value", ["", "   "])
 def test_invalid_hash_is_not_persisted(users, hasher, data, monkeypatch, value):
     monkeypatch.setattr(hasher, "hash", lambda password: value)
-    with pytest.raises(ValueError, match="password_hash"):
+    with pytest.raises(InvalidData, match="password_hash"):
         RegisterUser(users, hasher).execute(**data)
     assert users.saved == []
 
@@ -185,7 +184,7 @@ def test_unknown_username_and_wrong_password_have_same_error(users, hasher, regi
     before = vars(registered).copy()
     errors = []
     for username, password in [("missing", PASSWORD), ("Alice", "wrong")]:
-        with pytest.raises(InvalidCredentialsError) as error:
+        with pytest.raises(NotAuthorized) as error:
             AuthenticateUser(users, hasher).execute(
                 username=username, password=password
             )
@@ -200,7 +199,7 @@ def test_unknown_username_and_wrong_password_have_same_error(users, hasher, regi
 
 
 def test_login_does_not_normalize_username(users, hasher, registered):
-    with pytest.raises(InvalidCredentialsError):
+    with pytest.raises(NotAuthorized):
         AuthenticateUser(users, hasher).execute(username=" Alice ", password=PASSWORD)
     assert hasher.verify_calls == []
     assert users.saved == []

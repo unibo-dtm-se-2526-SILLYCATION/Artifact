@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from datetime import date
 
+from sillycation.domain.errors import InvalidData
+
 
 @dataclass(frozen=True)
 class TripPeriod:
@@ -13,7 +15,7 @@ class TripPeriod:
 
     def __post_init__(self) -> None:
         if self.start_date > self.end_date:
-            raise ValueError("Trip start date must not be later than end date")
+            raise InvalidData("Trip start date must not be later than end date")
 
     def overlaps(self, other: "TripPeriod") -> bool:
         return self.start_date <= other.end_date and self.end_date >= other.start_date
@@ -34,4 +36,4 @@ class VoteValue:
 
     def __post_init__(self) -> None:
         if type(self.value) is not int or not 1 <= self.value <= 5:
-            raise ValueError("Vote value must be an integer between 1 and 5")
+            raise InvalidData("Vote value must be an integer between 1 and 5")

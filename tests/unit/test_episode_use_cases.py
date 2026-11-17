@@ -8,11 +8,17 @@ from sillycation.application.episode_use_cases import (
     CreateEpisode,
     DeleteEpisode,
     EditEpisode,
-    EpisodeApplicationError,
     SubmitEpisode,
 )
 from sillycation.application.ports.repositories import EpisodeRepository, TripRepository
 from sillycation.domain.episode import Episode, EpisodeStatus
+from sillycation.domain.errors import (
+    Duplicate,
+    InvalidData,
+    InvalidState,
+    NotAuthorized,
+    NotFound,
+)
 from sillycation.domain.identifiers import EpisodeId, JoinRequestId, TripId, UserId
 from sillycation.domain.trip import Trip, TripStatus
 from sillycation.domain.value_objects import InvitationCode, TripPeriod
@@ -167,16 +173,18 @@ def test_create_allows_author_as_protagonist(trips, episodes, data):
 
 def test_duplicate_episode_id_does_not_overwrite(trips, episodes, data, draft):
     before = deepcopy(vars(episodes.stored[draft.id]))
-    with pytest.raises(EpisodeApplicationError, match="already"):
+    with pytest.raises(Duplicate, match="already"):
         CreateEpisode(trips, episodes).execute(**data)
     assert episodes.saved == []
     assert vars(episodes.stored[draft.id]) == before
 
 
-@pytest.mark.parametrize("field", ["author_id", "protagonist_id"])
-def test_create_rejects_nonparticipant(trips, episodes, data, field):
+@pytest.mark.parametrize(
+    "field,expected", [("author_id", NotAuthorized), ("protagonist_id", InvalidData)]
+)
+def test_create_rejects_nonparticipant(trips, episodes, data, field, expected):
     data[field] = UserId("outsider")
-    with pytest.raises(EpisodeApplicationError, match="participant"):
+    with pytest.raises(expected, match="participant"):
         CreateEpisode(trips, episodes).execute(**data)
     assert episodes.saved == []
     assert episodes.stored == {}
@@ -202,7 +210,7 @@ def test_date_outside_trip_is_rejected(trips, episodes, data, changes, mode, day
         CreateEpisode(trips, episodes).execute(**data)
         episodes.saved.clear()
     before = {key: deepcopy(vars(value)) for key, value in episodes.stored.items()}
-    with pytest.raises(EpisodeApplicationError, match="date"):
+    with pytest.raises(InvalidData, match="date"):
         if mode == "create":
             CreateEpisode(trips, episodes).execute(**{**data, "date": day})
         else:
@@ -236,7 +244,7 @@ def test_edit_persists_all_changes_and_preserves_identity(
 
 def test_edit_rejects_new_protagonist_outside_trip(trips, episodes, draft, changes):
     changes["protagonist_id"] = UserId("outsider")
-    with pytest.raises(EpisodeApplicationError, match="participant"):
+    with pytest.raises(InvalidData, match="participant"):
         EditEpisode(trips, episodes).execute(
             episode_id=draft.id, requested_by=AUTHOR, **changes
         )
@@ -255,7 +263,7 @@ def test_submit_persists_voting_and_prevents_later_edit(
     assert episodes.saved == [draft.id]
     assert trips.lookups == [draft.trip_id]
     episodes.saved.clear()
-    with pytest.raises(ValueError, match="DRAFT"):
+    with pytest.raises(InvalidState, match="DRAFT"):
         EditEpisode(trips, episodes).execute(
             episode_id=draft.id, requested_by=AUTHOR, **changes
         )
@@ -265,7 +273,7 @@ def test_submit_persists_voting_and_prevents_later_edit(
 
 @pytest.mark.parametrize("mode", ["edit", "submit"])
 def test_non_author_is_rejected_by_domain(trips, episodes, draft, changes, mode):
-    with pytest.raises(ValueError, match="author"):
+    with pytest.raises(NotAuthorized, match="author"):
         if mode == "edit":
             EditEpisode(trips, episodes).execute(
                 episode_id=draft.id, requested_by=PROTAGONIST, **changes
@@ -288,7 +296,7 @@ def test_non_draft_is_rejected_by_domain(
     # Simulate loaded lifecycle states, including transient SUBMITTED, without voting setup.
     monkeypatch.setattr(episodes.stored[draft.id], "_status", status)
     before = deepcopy(vars(episodes.stored[draft.id]))
-    with pytest.raises(ValueError, match="DRAFT"):
+    with pytest.raises(InvalidState, match="DRAFT"):
         if mode == "edit":
             EditEpisode(trips, episodes).execute(
                 episode_id=draft.id, requested_by=AUTHOR, **changes
@@ -313,10 +321,9 @@ def test_non_active_trip_is_rejected(
     other = active_trip()
     monkeypatch.setattr(other, "_id", TripId("other"))
     trips.stored[other.id] = other
-    expected = ValueError if mode == "submit" else EpisodeApplicationError
     if mode == "create":
         episodes.stored.clear()
-    with pytest.raises(expected, match="ACTIVE"):
+    with pytest.raises(InvalidState, match="ACTIVE"):
         if mode == "create":
             CreateEpisode(trips, episodes).execute(**data)
         elif mode == "edit":
@@ -336,7 +343,7 @@ def test_missing_trip(trips, episodes, draft, data, changes, mode):
     trips.stored.clear()
     if mode == "create":
         episodes.stored.clear()
-    with pytest.raises(LookupError, match="Trip"):
+    with pytest.raises(NotFound, match="Trip"):
         if mode == "create":
             CreateEpisode(trips, episodes).execute(**data)
         elif mode == "edit":
@@ -352,7 +359,7 @@ def test_missing_trip(trips, episodes, draft, data, changes, mode):
 
 @pytest.mark.parametrize("mode", ["edit", "submit"])
 def test_missing_episode(trips, episodes, changes, mode):
-    with pytest.raises(LookupError, match="Episode"):
+    with pytest.raises(NotFound, match="Episode"):
         if mode == "edit":
             EditEpisode(trips, episodes).execute(
                 episode_id=EPISODE_ID, requested_by=AUTHOR, **changes
@@ -370,7 +377,7 @@ def test_domain_field_validation_propagates(trips, episodes, data, changes, mode
     if mode == "edit":
         CreateEpisode(trips, episodes).execute(**data)
         episodes.saved.clear()
-    with pytest.raises(ValueError, match="title"):
+    with pytest.raises(InvalidData, match="title"):
         if mode == "create":
             CreateEpisode(trips, episodes).execute(**{**data, "title": ""})
         else:
@@ -433,7 +440,7 @@ def test_delete_removes_only_target_and_second_attempt_fails(trips, episodes, dr
     assert episodes.saved == []
     assert trips.lookups == [draft.trip_id]
     assert vars(trips.stored[draft.trip_id]) == trip_before
-    with pytest.raises(LookupError, match="Episode"):
+    with pytest.raises(NotFound, match="Episode"):
         use_case.execute(episode_id=draft.id, requested_by=AUTHOR)
     assert episodes.deleted == [draft.id]
 
@@ -444,7 +451,7 @@ def test_delete_missing_aggregate_does_not_write(trips, episodes, draft, missing
         episodes.stored.clear()
     else:
         trips.stored.clear()
-    with pytest.raises(LookupError):
+    with pytest.raises(NotFound):
         DeleteEpisode(trips, episodes).execute(episode_id=draft.id, requested_by=AUTHOR)
     assert episodes.deleted == []
     assert episodes.saved == []
@@ -464,7 +471,7 @@ def test_delete_checks_owning_trip_state(trips, episodes, draft, status, monkeyp
     monkeypatch.setattr(other, "_id", TripId("other"))
     trips.stored[other.id] = other
     before = deepcopy(vars(trips.stored[draft.trip_id]))
-    with pytest.raises(EpisodeApplicationError, match="ACTIVE"):
+    with pytest.raises(InvalidState, match="ACTIVE"):
         DeleteEpisode(trips, episodes).execute(episode_id=draft.id, requested_by=AUTHOR)
     assert trips.lookups == [draft.trip_id]
     assert episodes.deleted == []
@@ -483,7 +490,7 @@ def test_delete_creator_has_no_privilege_over_another_authors_draft(
     )
     episodes.stored[episode.id] = episode
     before = deepcopy(vars(episode))
-    with pytest.raises(ValueError, match="author"):
+    with pytest.raises(NotAuthorized, match="author"):
         DeleteEpisode(trips, episodes).execute(
             episode_id=episode.id, requested_by=actor
         )
@@ -501,7 +508,7 @@ def test_delete_rejects_non_draft_without_write(
     # Same loaded-state fixture used by the existing edit/submit tests.
     monkeypatch.setattr(episodes.stored[draft.id], "_status", status)
     before = deepcopy(vars(episodes.stored[draft.id]))
-    with pytest.raises(ValueError, match="DRAFT"):
+    with pytest.raises(InvalidState, match="DRAFT"):
         DeleteEpisode(trips, episodes).execute(episode_id=draft.id, requested_by=AUTHOR)
     assert vars(episodes.stored[draft.id]) == before
     assert episodes.deleted == []

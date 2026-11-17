@@ -4,6 +4,7 @@ from datetime import date
 import pytest
 
 from sillycation.domain.episode import Episode, EpisodeStatus
+from sillycation.domain.errors import InvalidData, InvalidState, NotAuthorized
 from sillycation.domain.identifiers import EpisodeId, TripId, UserId, VoteId
 from sillycation.domain.trip import TripStatus
 from sillycation.domain.value_objects import VoteValue
@@ -48,7 +49,7 @@ def test_author_can_check_deletability_without_mutation(episode):
 @pytest.mark.parametrize("actor", [PROTAGONIST, UserId("creator"), UserId("outsider")])
 def test_non_author_cannot_delete(episode, actor):
     before = deepcopy(vars(episode))
-    with pytest.raises(ValueError, match="author"):
+    with pytest.raises(NotAuthorized, match="author"):
         episode.ensure_deletable(requested_by=actor)
     assert vars(episode) == before
 
@@ -65,7 +66,7 @@ def test_voted_episode_cannot_be_deleted_or_changed(episode, completed):
         trip_status=TripStatus.ACTIVE,
     )
     before = deepcopy(vars(episode))
-    with pytest.raises(ValueError, match="DRAFT"):
+    with pytest.raises(InvalidState, match="DRAFT"):
         episode.ensure_deletable(requested_by=AUTHOR)
     assert vars(episode) == before
 
@@ -79,7 +80,7 @@ def test_author_can_also_be_protagonist(data):
 @pytest.mark.parametrize("value", [None, "", " \t\n"])
 def test_mandatory_text_cannot_be_missing_or_blank(data, field, value):
     data[field] = value
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         Episode(**data)
 
 
@@ -96,7 +97,7 @@ def test_text_is_preserved_without_undocumented_length_limits(data):
 )
 def test_mandatory_identity_and_date_cannot_be_missing(data, field):
     data[field] = None
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         Episode(**data)
 
 
@@ -117,7 +118,7 @@ def test_author_can_edit_draft(episode):
 
 
 def test_non_author_cannot_edit_draft(episode, data):
-    with pytest.raises(ValueError):
+    with pytest.raises(NotAuthorized):
         episode.edit(
             requested_by=PROTAGONIST,
             title="Changed",
@@ -138,7 +139,7 @@ def test_failed_edit_preserves_all_fields(episode, data, field, value):
         title="Changed", description="Changed", date=DAY, protagonist_id=AUTHOR
     )
     changes[field] = value
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         episode.edit(requested_by=AUTHOR, **changes)
     for field, value in data.items():
         assert getattr(episode, field) == value
@@ -153,7 +154,7 @@ def test_submission_automatically_opens_voting(episode, data):
 
 @pytest.mark.parametrize("actor", [PROTAGONIST, UserId("outsider")])
 def test_only_author_can_submit(episode, actor):
-    with pytest.raises(ValueError):
+    with pytest.raises(NotAuthorized):
         episode.submit(requested_by=actor, trip_status=TripStatus.ACTIVE)
     assert episode.status is EpisodeStatus.DRAFT
 
@@ -162,21 +163,21 @@ def test_only_author_can_submit(episode, actor):
     "status", [TripStatus.PLANNED, TripStatus.COMPLETED, TripStatus.ARCHIVED]
 )
 def test_submission_requires_current_active_trip(episode, status):
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         episode.submit(requested_by=AUTHOR, trip_status=status)
     assert episode.status is EpisodeStatus.DRAFT
 
 
 def test_episode_cannot_be_submitted_twice(episode):
     episode.submit(requested_by=AUTHOR, trip_status=TripStatus.ACTIVE)
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         episode.submit(requested_by=AUTHOR, trip_status=TripStatus.ACTIVE)
     assert episode.status is EpisodeStatus.VOTING
 
 
 def test_submitted_episode_cannot_be_edited(episode, data):
     episode.submit(requested_by=AUTHOR, trip_status=TripStatus.ACTIVE)
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         episode.edit(
             requested_by=AUTHOR,
             title="Changed",

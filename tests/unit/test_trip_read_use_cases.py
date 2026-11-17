@@ -13,6 +13,7 @@ from sillycation.application.trip_read_use_cases import (
     ListMyTrips,
     TripSummary,
 )
+from sillycation.domain.errors import NotAuthorized, NotFound
 from sillycation.domain.identifiers import TripId, UserId, JoinRequestId
 from sillycation.domain.trip import Trip, TripStatus, Participant
 from sillycation.domain.value_objects import InvitationCode, TripPeriod
@@ -118,7 +119,7 @@ def test_creator_only_reads_reject_other_actors(use_case, actor):
     trip = make_trip()
     trips = MemoryTrips([trip])
     before = deepcopy(vars(trip))
-    with pytest.raises(PermissionError):
+    with pytest.raises(NotAuthorized):
         use_case(trips).execute(trip_id=trip.id, requested_by=actor)
     assert vars(trip) == before
     assert trips.lookups == [trip.id]
@@ -130,7 +131,7 @@ def test_creator_only_reads_reject_other_actors(use_case, actor):
 def test_participant_read_excludes_non_members(status, actor):
     trip = make_trip(status=status)
     before = deepcopy(vars(trip))
-    with pytest.raises(PermissionError):
+    with pytest.raises(NotAuthorized):
         GetTripParticipants(MemoryTrips([trip])).execute(
             trip_id=trip.id, requested_by=actor
         )
@@ -140,7 +141,7 @@ def test_participant_read_excludes_non_members(status, actor):
 @pytest.mark.parametrize("use_case", READS)
 def test_missing_trip_is_lookup_error(use_case):
     trips = MemoryTrips([make_trip("other")])
-    with pytest.raises(LookupError, match="Trip"):
+    with pytest.raises(NotFound, match="Trip"):
         use_case(trips).execute(trip_id=TripId("missing"), requested_by=CREATOR)
     assert trips.lookups == [TripId("missing")]
 

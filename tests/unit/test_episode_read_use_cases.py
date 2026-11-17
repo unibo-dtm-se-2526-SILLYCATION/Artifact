@@ -13,6 +13,7 @@ from sillycation.application.episode_read_use_cases import (
 from sillycation.application.ports.repositories import EpisodeRepository, TripRepository
 from sillycation.application.ranking_use_cases import GetParticipantRanking
 from sillycation.domain.episode import Episode, EpisodeStatus
+from sillycation.domain.errors import NotAuthorized, NotFound
 from sillycation.domain.identifiers import (
     EpisodeId,
     JoinRequestId,
@@ -246,7 +247,7 @@ def test_unauthorized_before_episode_query(use_case, actor):
     trip = make_trip()
     episodes = MemoryEpisodes([])
     before = deepcopy(vars(trip))
-    with pytest.raises(PermissionError):
+    with pytest.raises(NotAuthorized):
         use_case(MemoryTrips(trip), episodes).execute(
             trip_id=trip.id, requested_by=actor
         )
@@ -257,7 +258,7 @@ def test_unauthorized_before_episode_query(use_case, actor):
 @pytest.mark.parametrize("use_case", READS)
 def test_missing_trip(use_case):
     episodes = MemoryEpisodes([])
-    with pytest.raises(LookupError):
+    with pytest.raises(NotFound):
         use_case(MemoryTrips(make_trip()), episodes).execute(
             trip_id=TripId("missing"), requested_by=AUTHOR
         )
