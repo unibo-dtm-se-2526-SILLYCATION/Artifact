@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Iterable, Optional
 
 from sillycation.domain.episode import Episode, EpisodeStatus
-from sillycation.domain.errors import InvalidState
+from sillycation.domain.errors import InvalidData
 from sillycation.domain.identifiers import UserId
 from sillycation.domain.trip import Participant, Trip, TripStatus
 from sillycation.domain.value_objects import TripPeriod
@@ -56,9 +56,9 @@ class RankingService:
         # Fix accumulation order too: Decimal addition uses the current context.
         for episode in sorted(completed, key=lambda item: item.id.value):
             if episode.score is None:
-                raise InvalidState("Completed episode has no score")
+                raise InvalidData("Completed episode has no score")
             if episode.protagonist_id not in totals:
-                raise InvalidState("Episode protagonist is not a Trip participant")
+                raise InvalidData("Episode protagonist is not a Trip participant")
             totals[episode.protagonist_id] += episode.score
 
         ordered = sorted(totals.items(), key=lambda item: (-item[1], item[0].value))

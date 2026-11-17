@@ -64,7 +64,7 @@ class MemoryEpisodes:
     def delete(self, episode_id: EpisodeId) -> None:
         self.deleted.append(episode_id)
         if episode_id not in self.stored:
-            raise LookupError("Episode not found during delete")
+            raise NotFound("Episode not found during delete")
         del self.stored[episode_id]
 
     def get_by_id(self, episode_id: EpisodeId) -> Optional[Episode]:
@@ -536,7 +536,7 @@ def test_delete_propagates_technical_errors(
     assert vars(episodes.stored[draft.id]) == vars(draft)
 
 
-def test_episode_disappearing_during_delete_propagates_lookup_error(
+def test_episode_disappearing_during_delete_propagates_not_found(
     trips, episodes, draft, monkeypatch
 ):
     original_delete = episodes.delete
@@ -546,7 +546,7 @@ def test_episode_disappearing_during_delete_propagates_lookup_error(
         original_delete(episode_id)
 
     monkeypatch.setattr(episodes, "delete", disappear_then_delete)
-    with pytest.raises(LookupError, match="during delete"):
+    with pytest.raises(NotFound, match="during delete"):
         DeleteEpisode(trips, episodes).execute(episode_id=draft.id, requested_by=AUTHOR)
     assert episodes.deleted == [draft.id]
     assert episodes.saved == []

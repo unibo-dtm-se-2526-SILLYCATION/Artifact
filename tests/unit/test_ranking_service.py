@@ -7,7 +7,7 @@ from itertools import permutations
 import pytest
 
 from sillycation.domain.episode import Episode, EpisodeStatus
-from sillycation.domain.errors import InvalidState
+from sillycation.domain.errors import InvalidData
 from sillycation.domain.identifiers import (
     EpisodeId,
     JoinRequestId,
@@ -168,6 +168,6 @@ def test_inconsistent_completed_episode_is_rejected_without_mutation(
         # The score is derived from the votes, so simulate its absence.
         monkeypatch.setattr(Episode, "score", None)
     before = deepcopy([vars(trip), vars(episode)])
-    with pytest.raises(InvalidState, match="score|protagonist"):
+    with pytest.raises(InvalidData, match="score|protagonist"):
         RankingService().calculate(trip, [episode])
     assert [vars(trip), vars(episode)] == before
