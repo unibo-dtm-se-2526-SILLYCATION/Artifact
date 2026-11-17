@@ -11,7 +11,7 @@ Authenticated identity and credential providers belong to step 15.
 
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 
 from sillycation.application.episode_read_use_cases import (
     GetTripDashboard,
@@ -25,6 +25,21 @@ from sillycation.application.trip_read_use_cases import (
     GetTripParticipants,
     ListMyTrips,
 )
+from sillycation.domain.identifiers import UserId
+
+
+def get_authenticated_user_id() -> UserId:
+    """Block protected routes until step 15 supplies a verified identity.
+
+    No headers, query parameters or body fields are trusted as an identity.
+    This is an integration boundary, not an authentication implementation.
+    Only tests currently override it. The read router remains unmounted until
+    authentication, persistence composition and HTTP errors are integrated.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Protected API is not configured",
+    )
 
 
 def get_trip_repository() -> TripRepository:
