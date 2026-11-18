@@ -26,6 +26,7 @@ from sillycation.adapters.api.dependencies import (
     get_request_join_trip,
 )
 from sillycation.adapters.api.mappers import join_request_response, trip_response
+from sillycation.adapters.api.openapi import error_responses
 from sillycation.adapters.api.schemas.requests import (
     CreateTripRequest,
     RequestJoinTripRequest,
@@ -47,7 +48,14 @@ router = APIRouter(tags=["trips"], dependencies=[Depends(get_authenticated_user_
 AuthenticatedUserId = Annotated[UserId, Depends(get_authenticated_user_id)]
 
 
-@router.post("/trips", response_model=TripResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/trips",
+    response_model=TripResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(
+        "not_found", "invalid_state", "duplicate", "invalid_data"
+    ),
+)
 def create_trip(
     body: CreateTripRequest,
     actor: AuthenticatedUserId,
@@ -72,6 +80,7 @@ def create_trip(
     "/join-requests",
     response_model=JoinRequestResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=error_responses("not_found", "invalid_state", "duplicate"),
 )
 def request_join_trip(
     body: RequestJoinTripRequest,
@@ -91,6 +100,7 @@ def request_join_trip(
 @router.post(
     "/trips/{trip_id}/join-requests/{request_id}/approve",
     response_model=JoinRequestResponse,
+    responses=error_responses("not_authorized", "not_found", "invalid_state"),
 )
 def approve_join_request(
     trip_id: str,
@@ -110,6 +120,7 @@ def approve_join_request(
 @router.post(
     "/trips/{trip_id}/join-requests/{request_id}/reject",
     response_model=JoinRequestResponse,
+    responses=error_responses("not_authorized", "not_found", "invalid_state"),
 )
 def reject_join_request(
     trip_id: str,
@@ -126,7 +137,11 @@ def reject_join_request(
     )
 
 
-@router.post("/trips/{trip_id}/activate", response_model=TripResponse)
+@router.post(
+    "/trips/{trip_id}/activate",
+    response_model=TripResponse,
+    responses=error_responses("not_authorized", "not_found", "invalid_state"),
+)
 def activate_trip(
     trip_id: str,
     actor: AuthenticatedUserId,
@@ -140,7 +155,11 @@ def activate_trip(
     )
 
 
-@router.post("/trips/{trip_id}/complete", response_model=TripResponse)
+@router.post(
+    "/trips/{trip_id}/complete",
+    response_model=TripResponse,
+    responses=error_responses("not_authorized", "not_found", "invalid_state"),
+)
 def complete_trip(
     trip_id: str,
     actor: AuthenticatedUserId,
@@ -154,7 +173,11 @@ def complete_trip(
     )
 
 
-@router.post("/trips/{trip_id}/archive", response_model=TripResponse)
+@router.post(
+    "/trips/{trip_id}/archive",
+    response_model=TripResponse,
+    responses=error_responses("not_authorized", "not_found", "invalid_state"),
+)
 def archive_trip(
     trip_id: str,
     actor: AuthenticatedUserId,

@@ -14,6 +14,7 @@ from fastapi.routing import APIRoute
 
 from sillycation.adapters.api.dependencies import get_new_user_id, get_register_user
 from sillycation.adapters.api.mappers import registered_user_response
+from sillycation.adapters.api.openapi import error_responses
 from sillycation.adapters.api.schemas.requests import RegisterUserRequest
 from sillycation.adapters.api.schemas.responses import RegisteredUserResponse
 from sillycation.application.user_use_cases import RegisterUser
@@ -52,7 +53,12 @@ router = APIRouter(prefix="/users", tags=["users"], route_class=_RegistrationRou
 
 
 @router.post(
-    "", response_model=RegisteredUserResponse, status_code=status.HTTP_201_CREATED
+    "",
+    response_model=RegisteredUserResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(
+        "duplicate", "invalid_data", protected=False, registration=True
+    ),
 )
 def register_user(
     body: RegisterUserRequest,

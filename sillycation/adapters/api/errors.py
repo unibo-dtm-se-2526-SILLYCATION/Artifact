@@ -20,6 +20,35 @@ from sillycation.domain.errors import (
 )
 
 
+ERROR_CONTRACTS = (
+    (
+        NotAuthorized,
+        status.HTTP_403_FORBIDDEN,
+        "not_authorized",
+        "Operation not permitted.",
+    ),
+    (NotFound, status.HTTP_404_NOT_FOUND, "not_found", "Resource not found."),
+    (
+        InvalidState,
+        status.HTTP_409_CONFLICT,
+        "invalid_state",
+        "Operation not allowed in the current state.",
+    ),
+    (
+        Duplicate,
+        status.HTTP_409_CONFLICT,
+        "duplicate",
+        "Resource or action already exists.",
+    ),
+    (
+        InvalidData,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        "invalid_data",
+        "Invalid application data.",
+    ),
+)
+
+
 async def _application_error_response(
     request: Request,
     exc: Exception,
@@ -41,34 +70,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     Registration by exception class also handles subclasses through Starlette's
     exception lookup. No text matching or catch-all application handler is used.
     """
-    mappings = (
-        (
-            NotAuthorized,
-            status.HTTP_403_FORBIDDEN,
-            "not_authorized",
-            "Operation not permitted.",
-        ),
-        (NotFound, status.HTTP_404_NOT_FOUND, "not_found", "Resource not found."),
-        (
-            InvalidState,
-            status.HTTP_409_CONFLICT,
-            "invalid_state",
-            "Operation not allowed in the current state.",
-        ),
-        (
-            Duplicate,
-            status.HTTP_409_CONFLICT,
-            "duplicate",
-            "Resource or action already exists.",
-        ),
-        (
-            InvalidData,
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "invalid_data",
-            "Invalid application data.",
-        ),
-    )
-    for error_type, status_code, code, message in mappings:
+    for error_type, status_code, code, message in ERROR_CONTRACTS:
         app.add_exception_handler(
             error_type,
             partial(

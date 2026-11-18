@@ -20,6 +20,7 @@ from sillycation.adapters.api.dependencies import (
     get_submit_episode,
 )
 from sillycation.adapters.api.mappers import episode_response
+from sillycation.adapters.api.openapi import error_responses
 from sillycation.adapters.api.schemas.requests import (
     CastVoteRequest,
     CreateEpisodeRequest,
@@ -43,6 +44,9 @@ AuthenticatedUserId = Annotated[UserId, Depends(get_authenticated_user_id)]
     "/trips/{trip_id}/episodes",
     response_model=EpisodeResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=error_responses(
+        "not_authorized", "not_found", "invalid_state", "duplicate", "invalid_data"
+    ),
 )
 def create_episode(
     trip_id: str,
@@ -64,7 +68,13 @@ def create_episode(
     )
 
 
-@router.put("/episodes/{episode_id}", response_model=EpisodeResponse)
+@router.put(
+    "/episodes/{episode_id}",
+    response_model=EpisodeResponse,
+    responses=error_responses(
+        "not_authorized", "not_found", "invalid_state", "invalid_data"
+    ),
+)
 def edit_episode(
     episode_id: str,
     body: EditEpisodeRequest,
@@ -83,7 +93,11 @@ def edit_episode(
     )
 
 
-@router.delete("/episodes/{episode_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/episodes/{episode_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses("not_authorized", "not_found", "invalid_state"),
+)
 def delete_episode(
     episode_id: str,
     actor: AuthenticatedUserId,
@@ -93,7 +107,11 @@ def delete_episode(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/episodes/{episode_id}/submit", response_model=EpisodeResponse)
+@router.post(
+    "/episodes/{episode_id}/submit",
+    response_model=EpisodeResponse,
+    responses=error_responses("not_authorized", "not_found", "invalid_state"),
+)
 def submit_episode(
     episode_id: str,
     actor: AuthenticatedUserId,
@@ -108,6 +126,9 @@ def submit_episode(
     "/episodes/{episode_id}/votes",
     response_model=EpisodeResponse,
     status_code=status.HTTP_201_CREATED,
+    responses=error_responses(
+        "not_authorized", "not_found", "invalid_state", "duplicate", "invalid_data"
+    ),
 )
 def cast_vote(
     episode_id: str,

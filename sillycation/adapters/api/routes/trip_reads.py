@@ -28,6 +28,7 @@ from sillycation.adapters.api.mappers import (
     ranking_entry_response,
     trip_summary_response,
 )
+from sillycation.adapters.api.openapi import error_responses
 from sillycation.adapters.api.schemas.responses import (
     EpisodeResponse,
     InvitationCodeResponse,
@@ -60,7 +61,7 @@ router = APIRouter(
 AuthenticatedUserId = Annotated[UserId, Depends(get_authenticated_user_id)]
 
 
-@router.get("", response_model=list[TripSummaryResponse])
+@router.get("", response_model=list[TripSummaryResponse], responses=error_responses())
 def list_my_trips(
     actor: AuthenticatedUserId,
     use_case: Annotated[ListMyTrips, Depends(get_list_my_trips)],
@@ -72,7 +73,11 @@ def list_my_trips(
     ]
 
 
-@router.get("/{trip_id}/invitation-code", response_model=InvitationCodeResponse)
+@router.get(
+    "/{trip_id}/invitation-code",
+    response_model=InvitationCodeResponse,
+    responses=error_responses("not_authorized", "not_found"),
+)
 def read_invitation_code(
     trip_id: str,
     actor: AuthenticatedUserId,
@@ -83,7 +88,11 @@ def read_invitation_code(
     )
 
 
-@router.get("/{trip_id}/join-requests", response_model=list[JoinRequestResponse])
+@router.get(
+    "/{trip_id}/join-requests",
+    response_model=list[JoinRequestResponse],
+    responses=error_responses("not_authorized", "not_found"),
+)
 def read_pending_join_requests(
     trip_id: str,
     actor: AuthenticatedUserId,
@@ -95,7 +104,11 @@ def read_pending_join_requests(
     ]
 
 
-@router.get("/{trip_id}/participants", response_model=list[ParticipantResponse])
+@router.get(
+    "/{trip_id}/participants",
+    response_model=list[ParticipantResponse],
+    responses=error_responses("not_authorized", "not_found"),
+)
 def read_participants(
     trip_id: str,
     actor: AuthenticatedUserId,
@@ -107,7 +120,11 @@ def read_participants(
     ]
 
 
-@router.get("/{trip_id}/episodes", response_model=list[EpisodeResponse])
+@router.get(
+    "/{trip_id}/episodes",
+    response_model=list[EpisodeResponse],
+    responses=error_responses("not_authorized", "not_found"),
+)
 def read_episodes(
     trip_id: str,
     actor: AuthenticatedUserId,
@@ -119,7 +136,11 @@ def read_episodes(
     ]
 
 
-@router.get("/{trip_id}/ranking", response_model=list[RankingEntryResponse])
+@router.get(
+    "/{trip_id}/ranking",
+    response_model=list[RankingEntryResponse],
+    responses=error_responses("not_authorized", "not_found", "invalid_data"),
+)
 def read_ranking(
     trip_id: str,
     actor: AuthenticatedUserId,
@@ -131,7 +152,11 @@ def read_ranking(
     ]
 
 
-@router.get("/{trip_id}/dashboard", response_model=TripDashboardResponse)
+@router.get(
+    "/{trip_id}/dashboard",
+    response_model=TripDashboardResponse,
+    responses=error_responses("not_authorized", "not_found", "invalid_data"),
+)
 def read_dashboard(
     trip_id: str,
     actor: AuthenticatedUserId,
