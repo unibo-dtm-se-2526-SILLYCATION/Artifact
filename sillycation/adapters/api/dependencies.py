@@ -20,6 +20,12 @@ from sillycation.application.episode_read_use_cases import (
     GetTripDashboard,
     ListTripEpisodes,
 )
+from sillycation.application.episode_use_cases import (
+    CreateEpisode,
+    DeleteEpisode,
+    EditEpisode,
+    SubmitEpisode,
+)
 from sillycation.application.ports.repositories import (
     EpisodeRepository,
     TripRepository,
@@ -41,7 +47,14 @@ from sillycation.application.trip_use_cases import (
     RejectJoinRequest,
     RequestJoinTrip,
 )
-from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
+from sillycation.application.voting_use_cases import CastVote
+from sillycation.domain.identifiers import (
+    EpisodeId,
+    JoinRequestId,
+    TripId,
+    UserId,
+    VoteId,
+)
 from sillycation.domain.value_objects import InvitationCode
 
 
@@ -77,6 +90,14 @@ def get_new_trip_id() -> TripId:
 
 def get_new_join_request_id() -> JoinRequestId:
     return JoinRequestId(uuid4().hex)
+
+
+def get_new_episode_id() -> EpisodeId:
+    return EpisodeId(uuid4().hex)
+
+
+def get_new_vote_id() -> VoteId:
+    return VoteId(uuid4().hex)
 
 
 def get_new_invitation_code() -> InvitationCode:
@@ -162,3 +183,33 @@ def get_complete_trip(
 
 def get_archive_trip(trips: TripRepositoryDependency) -> ArchiveTrip:
     return ArchiveTrip(trips)
+
+
+def get_create_episode(
+    trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
+) -> CreateEpisode:
+    return CreateEpisode(trips, episodes)
+
+
+def get_edit_episode(
+    trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
+) -> EditEpisode:
+    return EditEpisode(trips, episodes)
+
+
+def get_delete_episode(
+    trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
+) -> DeleteEpisode:
+    return DeleteEpisode(trips, episodes)
+
+
+def get_submit_episode(
+    trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
+) -> SubmitEpisode:
+    return SubmitEpisode(trips, episodes)
+
+
+def get_cast_vote(
+    trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
+) -> CastVote:
+    return CastVote(trips, episodes)
