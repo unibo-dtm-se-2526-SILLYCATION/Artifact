@@ -17,6 +17,8 @@ jobs:
   check:
     runs-on: ubuntu-latest
     name: Preliminary Checks
+    env:
+      POETRY_INSTALLER_RE_RESOLVE: "false"
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -59,6 +61,8 @@ jobs:
 
   test:
     needs: check
+    env:
+      POETRY_INSTALLER_RE_RESOLVE: "false"
     strategy:
       fail-fast: false
       matrix:
