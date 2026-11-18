@@ -39,9 +39,9 @@ from sillycation.application.trip_use_cases import (
     CreateTrip,
     RejectJoinRequest,
     RequestJoinTrip,
-    ApplicationError,
 )
 from sillycation.domain.episode import Episode
+from sillycation.domain.errors import InvalidState, NotAuthorized
 from sillycation.domain.identifiers import EpisodeId, JoinRequestId, TripId, UserId
 from sillycation.domain.trip import JoinRequest, Participant, Trip, TripStatus
 from sillycation.domain.user import User
@@ -332,7 +332,7 @@ def test_only_creator_can_manage_trip_and_query_or_body_cannot_spoof_actor(
     trip, trips, _, _, _ = data
     before = (trip.status, trip.participants, trip.join_requests)
     with TestClient(internal_app(data, actor)) as client:
-        with pytest.raises(ValueError):
+        with pytest.raises(NotAuthorized):
             client.post(
                 path,
                 params={"requested_by": "creator"},
@@ -355,7 +355,7 @@ def test_overlap_on_create_propagates_without_temporary_http_mapping(data) -> No
     trip, trips, _, _, _ = data
     trips.find_active_or_planned_trips_by_participant.return_value = [trip]
     with TestClient(internal_app(data)) as client:
-        with pytest.raises(ApplicationError):
+        with pytest.raises(InvalidState):
             client.post("/api/v1/trips", json=BODY)
     trips.save.assert_not_called()
 
