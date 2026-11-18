@@ -6,6 +6,12 @@ from decimal import Decimal
 from enum import Enum
 from typing import Iterable, Optional
 
+from sillycation.domain.errors import (
+    Duplicate,
+    InvalidData,
+    InvalidState,
+    NotAuthorized,
+)
 from sillycation.domain.identifiers import EpisodeId, TripId, UserId, VoteId
 from sillycation.domain.trip import TripStatus
 from sillycation.domain.value_objects import VoteValue
@@ -22,7 +28,7 @@ class Vote:
 
     def __post_init__(self) -> None:
         if not isinstance(self.value, VoteValue):
-            raise ValueError("Vote requires a validated VoteValue")
+            raise InvalidData("Vote requires a validated VoteValue")
 
 
 class EpisodeStatus(Enum):
@@ -55,7 +61,7 @@ class Episode:
         date: Date,
     ) -> None:
         if id is None or trip_id is None or author_id is None:
-            raise ValueError("Episode, trip and author identities are required")
+            raise InvalidData("Episode, trip and author identities are required")
         self._validate_data(title, description, date, protagonist_id)
         self._id = id
         self._trip_id = trip_id
@@ -90,11 +96,11 @@ class Episode:
         episode = cls(id, trip_id, author_id, protagonist_id, title, description, date)
         recorded = {vote.voter_id: vote for vote in votes}
         if any(vote.episode_id != id for vote in recorded.values()):
-            raise ValueError("Stored votes must belong to this episode")
+            raise InvalidData("Stored votes must belong to this episode")
         if status is EpisodeStatus.DRAFT and recorded:
-            raise ValueError("A stored DRAFT episode cannot have votes")
+            raise InvalidData("A stored DRAFT episode cannot have votes")
         if status is EpisodeStatus.COMPLETED and not recorded:
-            raise ValueError("A stored COMPLETED episode must have votes")
+            raise InvalidData("A stored COMPLETED episode must have votes")
         episode._status = status
         episode._votes = recorded
         return episode
@@ -163,18 +169,18 @@ class Episode:
         for every vote and does not need to be stored here.
         """
         if self.status is not EpisodeStatus.VOTING:
-            raise ValueError("Episode must be VOTING to receive votes")
+            raise InvalidState("Episode must be VOTING to receive votes")
         if trip_status is not TripStatus.ACTIVE:
-            raise ValueError("Voting requires an ACTIVE trip")
+            raise InvalidState("Voting requires an ACTIVE trip")
         eligible = frozenset(eligible_voters)
         if self.protagonist_id in eligible or voter_id == self.protagonist_id:
-            raise ValueError("The protagonist cannot be an eligible voter")
+            raise NotAuthorized("The protagonist cannot be an eligible voter")
         if voter_id not in eligible:
-            raise ValueError("Voter is not eligible for this episode")
+            raise NotAuthorized("Voter is not eligible for this episode")
         if self.has_vote_from(voter_id):
-            raise ValueError("User has already voted on this episode")
+            raise Duplicate("User has already voted on this episode")
         if any(vote.id == vote_id for vote in self._votes.values()):
-            raise ValueError("Vote identity is already in use")
+            raise Duplicate("Vote identity is already in use")
         vote = Vote(vote_id, self.id, voter_id, value)
         self._votes[voter_id] = vote
         if self._votes.keys() == eligible:
@@ -206,7 +212,7 @@ class Episode:
         """
         self._require_author_draft(requested_by)
         if trip_status is not TripStatus.ACTIVE:
-            raise ValueError("Episode submission requires an ACTIVE trip")
+            raise InvalidState("Episode submission requires an ACTIVE trip")
         self._status = EpisodeStatus.SUBMITTED
         self._status = EpisodeStatus.VOTING
 
@@ -219,17 +225,17 @@ class Episode:
 
     def _require_author_draft(self, requested_by: UserId) -> None:
         if requested_by != self.author_id:
-            raise ValueError("Only the episode author may perform this operation")
+            raise NotAuthorized("Only the episode author may perform this operation")
         if self.status is not EpisodeStatus.DRAFT:
-            raise ValueError("Episode must be DRAFT for this operation")
+            raise InvalidState("Episode must be DRAFT for this operation")
 
     @staticmethod
     def _validate_data(
         title: str, description: str, date: Date, protagonist_id: UserId
     ) -> None:
         if not isinstance(title, str) or not title.strip():
-            raise ValueError("Episode title is required")
+            raise InvalidData("Episode title is required")
         if not isinstance(description, str) or not description.strip():
-            raise ValueError("Episode description is required")
+            raise InvalidData("Episode description is required")
         if date is None or protagonist_id is None:
-            raise ValueError("Episode date and protagonist are required")
+            raise InvalidData("Episode date and protagonist are required")

@@ -2,8 +2,7 @@
 
 The caller supplies authenticated actor identities, system-allocated identifiers
 and invitation codes, and the current date. Generation and authentication are
-outside these use cases. LookupError denotes missing users/trips; ApplicationError
-denotes cross-aggregate conflicts. Domain ValueError exceptions propagate intact.
+outside these use cases. Errors are the classes of sillycation.domain.errors.
 """
 
 from datetime import date
@@ -14,20 +13,17 @@ from sillycation.application.ports.repositories import (
     TripRepository,
     UserRepository,
 )
+from sillycation.domain.errors import Duplicate, InvalidState, NotFound
 from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
 from sillycation.domain.services import TripConflictService
 from sillycation.domain.trip import JoinRequest, Trip
 from sillycation.domain.value_objects import InvitationCode, TripPeriod
 
 
-class ApplicationError(Exception):
-    """A workflow cannot proceed because of a cross-aggregate conflict."""
-
-
 def _get_trip(trips: TripRepository, trip_id: TripId) -> Trip:
     trip = trips.get_by_id(trip_id)
     if trip is None:
-        raise LookupError("Trip not found")
+        raise NotFound("Trip not found")
     return trip
 
 
@@ -60,15 +56,15 @@ class CreateTrip:
         A future persistence adapter must enforce uniqueness atomically.
         """
         if self._users.get_by_id(creator_id) is None:
-            raise LookupError("User not found")
+            raise NotFound("User not found")
         period = TripPeriod(start_date, end_date)
         if self._trips.get_by_id(trip_id) is not None:
-            raise ApplicationError("Trip identity already exists")
+            raise Duplicate("Trip identity already exists")
         if self._trips.get_by_invitation_code(invitation_code) is not None:
-            raise ApplicationError("Invitation code already exists")
+            raise Duplicate("Invitation code already exists")
         trip = Trip(trip_id, name, creator_id, period, invitation_code, description)
         if _has_conflict(self._trips, creator_id, trip):
-            raise ApplicationError("Trip periods overlap")
+            raise InvalidState("Trip periods overlap")
         return self._trips.save(trip)
 
 
@@ -85,9 +81,9 @@ class RequestJoinTrip:
     ) -> JoinRequest:
         trip = self._trips.get_by_invitation_code(invitation_code)
         if trip is None:
-            raise LookupError("Trip invitation code not found")
+            raise NotFound("Trip invitation code not found")
         if _has_conflict(self._trips, user_id, trip):
-            raise ApplicationError("Trip periods overlap")
+            raise InvalidState("Trip periods overlap")
         trip.request_to_join(request_id, user_id)
         saved = self._trips.save(trip)
         return saved.get_join_request(request_id)

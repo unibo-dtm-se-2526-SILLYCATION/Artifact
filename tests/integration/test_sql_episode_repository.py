@@ -12,6 +12,7 @@ from sillycation.adapters.persistence.episode_repository import (
 )
 from sillycation.application.ports.repositories import EpisodeRepository
 from sillycation.domain.episode import Episode, EpisodeStatus
+from sillycation.domain.errors import NotFound
 from sillycation.domain.identifiers import EpisodeId, TripId, UserId, VoteId
 from sillycation.domain.trip import TripStatus
 from sillycation.domain.value_objects import VoteValue
@@ -163,10 +164,10 @@ def test_deleted_episode_is_no_longer_found(episodes: EpisodeRepository) -> None
     assert episodes.get_by_id(EpisodeId("kept")) is not None
 
 
-def test_deleting_an_unknown_episode_raises_lookup_error(
+def test_deleting_an_unknown_episode_raises_not_found(
     episodes: EpisodeRepository,
 ) -> None:
-    with pytest.raises(LookupError):
+    with pytest.raises(NotFound):
         episodes.delete(EpisodeId("missing"))
 
 

@@ -7,6 +7,7 @@ from typing import Optional, Sequence
 
 from sillycation.application.ports.repositories import EpisodeRepository, TripRepository
 from sillycation.domain.episode import Episode, EpisodeStatus
+from sillycation.domain.errors import NotAuthorized, NotFound
 from sillycation.domain.identifiers import EpisodeId, TripId, UserId
 from sillycation.domain.services import RankingEntry, RankingService
 from sillycation.domain.trip import Participant, Trip, TripStatus
@@ -52,9 +53,9 @@ def _load(
 ) -> tuple[Trip, tuple[Episode, ...]]:
     trip = trips.get_by_id(trip_id)
     if trip is None:
-        raise LookupError("Trip not found")
+        raise NotFound("Trip not found")
     if Participant(trip.id, requested_by) not in trip.participants:
-        raise PermissionError("Only Trip participants may access these data")
+        raise NotAuthorized("Only Trip participants may access these data")
     return trip, tuple(
         episode
         for episode in episodes.find_by_trip(trip.id)

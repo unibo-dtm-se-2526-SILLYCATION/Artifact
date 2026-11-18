@@ -5,6 +5,13 @@ from datetime import date
 from enum import Enum
 from typing import Iterable, Optional
 
+from sillycation.domain.errors import (
+    Duplicate,
+    InvalidData,
+    InvalidState,
+    NotAuthorized,
+    NotFound,
+)
 from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
 from sillycation.domain.value_objects import InvitationCode, TripPeriod
 
@@ -88,10 +95,10 @@ class Trip:
         trip = cls(id, name, creator_id, period, invitation_code, description)
         members = {Participant(id, user_id) for user_id in participants}
         if Participant(id, creator_id) not in members:
-            raise ValueError("Stored participants must include the trip creator")
+            raise InvalidData("Stored participants must include the trip creator")
         requests = {request.id: request for request in join_requests}
         if any(request.trip_id != id for request in requests.values()):
-            raise ValueError("Stored join requests must belong to this trip")
+            raise InvalidData("Stored join requests must belong to this trip")
         trip._status = status
         trip._participants = members
         trip._join_requests = requests
@@ -138,7 +145,7 @@ class Trip:
         try:
             return self._join_requests[request_id]
         except KeyError:
-            raise ValueError("Join request does not belong to this trip") from None
+            raise NotFound("Join request does not belong to this trip") from None
 
     def request_to_join(
         self, request_id: JoinRequestId, user_id: UserId
@@ -150,14 +157,14 @@ class Trip:
         """
         self._require_planned()
         if Participant(self.id, user_id) in self._participants:
-            raise ValueError("User is already a participant of this trip")
+            raise Duplicate("User is already a participant of this trip")
         if request_id in self._join_requests:
-            raise ValueError("Join request identity is already in use")
+            raise Duplicate("Join request identity is already in use")
         if any(
             request.user_id == user_id and request.status is JoinRequestStatus.PENDING
             for request in self._join_requests.values()
         ):
-            raise ValueError("User already has a pending join request")
+            raise Duplicate("User already has a pending join request")
         request = JoinRequest(request_id, self.id, user_id)
         self._join_requests[request_id] = request
         return request
@@ -191,7 +198,7 @@ class Trip:
         self._require_planned()
         request = self.get_join_request(request_id)
         if request.status is not JoinRequestStatus.PENDING:
-            raise ValueError("Join request must be PENDING for this operation")
+            raise InvalidState("Join request must be PENDING for this operation")
         return request
 
     def activate(self, *, requested_by: UserId, current_date: date) -> None:
@@ -199,9 +206,9 @@ class Trip:
         self._require_creator(requested_by)
         self._require_planned()
         if current_date < self.period.start_date:
-            raise ValueError("Trip cannot be activated before its start date")
+            raise InvalidState("Trip cannot be activated before its start date")
         if len(self._participants) < 2:
-            raise ValueError("Trip activation requires at least two participants")
+            raise InvalidState("Trip activation requires at least two participants")
         self._status = TripStatus.ACTIVE
 
     def complete(
@@ -214,24 +221,24 @@ class Trip:
         """Complete after the caller queries this Trip's unresolved Episodes."""
         self._require_creator(requested_by)
         if self.status is not TripStatus.ACTIVE:
-            raise ValueError("Trip must be ACTIVE for completion")
+            raise InvalidState("Trip must be ACTIVE for completion")
         if current_date < self.period.end_date:
-            raise ValueError("Trip cannot be completed before its end date")
+            raise InvalidState("Trip cannot be completed before its end date")
         if has_unresolved_episodes:
-            raise ValueError("Trip cannot be completed with unresolved Episodes")
+            raise InvalidState("Trip cannot be completed with unresolved Episodes")
         self._status = TripStatus.COMPLETED
 
     def archive(self, *, requested_by: UserId) -> None:
         """Archive a completed Trip without changing its game data."""
         self._require_creator(requested_by)
         if self.status is not TripStatus.COMPLETED:
-            raise ValueError("Trip must be COMPLETED for archival")
+            raise InvalidState("Trip must be COMPLETED for archival")
         self._status = TripStatus.ARCHIVED
 
     def _require_creator(self, requested_by: UserId) -> None:
         if requested_by != self.creator_id:
-            raise ValueError("Only the trip creator may perform this operation")
+            raise NotAuthorized("Only the trip creator may perform this operation")
 
     def _require_planned(self) -> None:
         if self.status is not TripStatus.PLANNED:
-            raise ValueError("Trip must be PLANNED for this operation")
+            raise InvalidState("Trip must be PLANNED for this operation")

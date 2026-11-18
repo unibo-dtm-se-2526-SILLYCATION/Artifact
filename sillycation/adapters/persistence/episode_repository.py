@@ -6,6 +6,7 @@ from sqlalchemy import ColumnElement, Engine, delete, insert, select
 
 from sillycation.adapters.persistence.tables import episodes, votes
 from sillycation.domain.episode import Episode, EpisodeStatus, Vote
+from sillycation.domain.errors import NotFound
 from sillycation.domain.identifiers import EpisodeId, TripId, UserId, VoteId
 from sillycation.domain.value_objects import VoteValue
 
@@ -68,7 +69,7 @@ class SqlAlchemyEpisodeRepository:
                 delete(episodes).where(episodes.c.id == episode_id.value)
             )
             if deleted.rowcount == 0:
-                raise LookupError("Episode not found")
+                raise NotFound("Episode not found")
 
     def get_by_id(self, episode_id: EpisodeId) -> Optional[Episode]:
         found = self._load(episodes.c.id == episode_id.value)

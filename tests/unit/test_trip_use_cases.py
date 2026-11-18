@@ -13,13 +13,19 @@ from sillycation.application.trip_use_cases import (
     ActivateTrip,
     CompleteTrip,
     ArchiveTrip,
-    ApplicationError,
     ApproveJoinRequest,
     CreateTrip,
     RejectJoinRequest,
     RequestJoinTrip,
 )
 from sillycation.domain.episode import Episode, EpisodeStatus
+from sillycation.domain.errors import (
+    Duplicate,
+    InvalidData,
+    InvalidState,
+    NotAuthorized,
+    NotFound,
+)
 from sillycation.domain.identifiers import (
     EpisodeId,
     JoinRequestId,
@@ -167,7 +173,7 @@ def test_create_trip_persists_creator_membership_and_supplied_values(
 def test_create_requires_existing_creator(creation_data):
     trips = MemoryTrips()
     creation_data["creator_id"] = UserId("missing")
-    with pytest.raises(LookupError, match="User"):
+    with pytest.raises(NotFound, match="User"):
         CreateTrip(trips, MemoryUsers()).execute(**creation_data)
     assert trips.saved == []
 
@@ -175,7 +181,7 @@ def test_create_requires_existing_creator(creation_data):
 def test_create_rejects_invalid_period(creation_data):
     trips = MemoryTrips()
     creation_data["end_date"] = date(2026, 10, 27)
-    with pytest.raises(ValueError, match="start date"):
+    with pytest.raises(InvalidData, match="start date"):
         CreateTrip(trips, MemoryUsers()).execute(**creation_data)
     assert trips.saved == []
 
@@ -187,7 +193,7 @@ def test_create_checks_creator_conflicts(creation_data, status):
         admit(other)
         other.activate(requested_by=CREATOR, current_date=DAY)
     trips = MemoryTrips([other])
-    with pytest.raises(ApplicationError, match="overlap"):
+    with pytest.raises(InvalidState, match="overlap"):
         CreateTrip(trips, MemoryUsers()).execute(**creation_data)
     assert trips.saved == []
 
@@ -200,7 +206,7 @@ def test_create_does_not_reuse_identity_or_invitation(creation_data, field, valu
     other = make_trip("other", creator=APPLICANT)
     trips = MemoryTrips([other])
     creation_data[field] = value
-    with pytest.raises(ApplicationError, match="already"):
+    with pytest.raises(Duplicate, match="already"):
         CreateTrip(trips, MemoryUsers()).execute(**creation_data)
     assert trips.saved == []
     assert trips.stored[other.id].creator_id == APPLICANT
@@ -224,7 +230,7 @@ def test_request_join_persists_pending_request_without_membership(trip):
 
 def test_request_unknown_invitation():
     trips = MemoryTrips()
-    with pytest.raises(LookupError, match="invitation"):
+    with pytest.raises(NotFound, match="invitation"):
         RequestJoinTrip(trips).execute(
             invitation_code=InvitationCode("missing"),
             request_id=REQUEST,
@@ -241,7 +247,7 @@ def test_request_overlap_has_no_side_effects(trip, status):
         admit(other, CREATOR)
         other.activate(requested_by=APPLICANT, current_date=DAY)
     trips = MemoryTrips([trip, other])
-    with pytest.raises(ApplicationError, match="overlap"):
+    with pytest.raises(InvalidState, match="overlap"):
         RequestJoinTrip(trips).execute(
             invitation_code=trip.invitation_code, request_id=REQUEST, user_id=APPLICANT
         )
@@ -260,7 +266,8 @@ def test_request_delegates_local_invariants(trip, invalid):
         trip.activate(requested_by=CREATOR, current_date=DAY)
     trips = MemoryTrips([trip])
     before = deepcopy(vars(trips.stored[trip.id]))
-    with pytest.raises(ValueError):
+    expected = InvalidState if invalid == "active" else Duplicate
+    with pytest.raises(expected):
         RequestJoinTrip(trips).execute(
             invitation_code=trip.invitation_code, request_id=REQUEST, user_id=APPLICANT
         )
@@ -313,7 +320,10 @@ def test_decisions_delegate_invariants_without_saving(pending, use_case, invalid
         pending.activate(requested_by=CREATOR, current_date=DAY)
     trips = MemoryTrips([pending])
     before = deepcopy(vars(trips.stored[pending.id]))
-    with pytest.raises(ValueError):
+    expected = {"unauthorized": NotAuthorized, "missing": NotFound}.get(
+        invalid, InvalidState
+    )
+    with pytest.raises(expected):
         use_case(trips).execute(
             trip_id=pending.id, request_id=request_id, requested_by=actor
         )
@@ -323,7 +333,7 @@ def test_decisions_delegate_invariants_without_saving(pending, use_case, invalid
 
 def test_unauthorized_approval_cannot_reject_even_when_conflicting(pending):
     trips = MemoryTrips([pending, make_trip("other", APPLICANT)])
-    with pytest.raises(ValueError, match="creator"):
+    with pytest.raises(NotAuthorized, match="creator"):
         ApproveJoinRequest(trips).execute(
             trip_id=pending.id, request_id=REQUEST, requested_by=APPLICANT
         )
@@ -358,7 +368,7 @@ def test_missing_trip_is_an_explicit_application_lookup_error(use_case):
         args["current_date"] = DAY
     else:
         args["request_id"] = REQUEST
-    with pytest.raises(LookupError, match="Trip"):
+    with pytest.raises(NotFound, match="Trip"):
         use_case(trips).execute(**args)
     assert trips.saved == []
 
@@ -386,7 +396,8 @@ def test_activate_delegates_invariants_without_saving(trip, invalid):
     if invalid == "active":
         trip.activate(requested_by=CREATOR, current_date=DAY)
     trips = MemoryTrips([trip])
-    with pytest.raises(ValueError):
+    expected = NotAuthorized if invalid == "unauthorized" else InvalidState
+    with pytest.raises(expected):
         ActivateTrip(trips).execute(
             trip_id=trip.id, requested_by=actor, current_date=today
         )
@@ -487,7 +498,7 @@ def test_unresolved_episodes_block_completion(status, monkeypatch):
     episodes = CompletionEpisodes([episode])
     trips = MemoryTrips([trip])
     before = deepcopy(vars(episode))
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         CompleteTrip(trips, episodes).execute(
             trip_id=trip.id, requested_by=CREATOR, current_date=END
         )
@@ -531,7 +542,8 @@ def test_lifecycle_use_case_failures_do_not_save(archive, invalid):
     args = dict(
         trip_id=trip.id, requested_by=APPLICANT if invalid == "actor" else CREATOR
     )
-    with pytest.raises(LookupError if invalid == "missing" else ValueError):
+    expected = {"missing": NotFound, "actor": NotAuthorized}.get(invalid, InvalidState)
+    with pytest.raises(expected):
         if archive:
             ArchiveTrip(trips).execute(**args)
         else:

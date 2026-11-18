@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from sillycation.application.ports.repositories import TripRepository
+from sillycation.domain.errors import NotAuthorized, NotFound
 from sillycation.domain.identifiers import TripId, UserId
 from sillycation.domain.trip import (
     JoinRequest,
@@ -28,13 +29,13 @@ class TripSummary:
 def _get_trip(trips: TripRepository, trip_id: TripId) -> Trip:
     trip = trips.get_by_id(trip_id)
     if trip is None:
-        raise LookupError("Trip not found")
+        raise NotFound("Trip not found")
     return trip
 
 
 def _require_creator(trip: Trip, requested_by: UserId) -> None:
     if requested_by != trip.creator_id:
-        raise PermissionError("Only the Trip creator may access this information")
+        raise NotAuthorized("Only the Trip creator may access this information")
 
 
 class GetTripInvitationCode:
@@ -79,9 +80,7 @@ class GetTripParticipants:
     ) -> tuple[Participant, ...]:
         trip = _get_trip(self._trips, trip_id)
         if Participant(trip.id, requested_by) not in trip.participants:
-            raise PermissionError(
-                "Only Trip participants may read the participant list"
-            )
+            raise NotAuthorized("Only Trip participants may read the participant list")
         return tuple(
             sorted(trip.participants, key=lambda participant: participant.user_id.value)
         )

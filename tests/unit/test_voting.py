@@ -4,6 +4,12 @@ from decimal import Decimal
 import pytest
 
 from sillycation.domain.episode import Episode, EpisodeStatus, Vote
+from sillycation.domain.errors import (
+    Duplicate,
+    InvalidData,
+    InvalidState,
+    NotAuthorized,
+)
 from sillycation.domain.identifiers import EpisodeId, TripId, UserId, VoteId
 from sillycation.domain.trip import TripStatus
 from sillycation.domain.value_objects import VoteValue
@@ -80,7 +86,7 @@ def test_registered_vote_is_immutable(episode, field, value):
 
 
 def test_vote_requires_validated_vote_value(episode):
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         episode.cast_vote(
             VoteId("raw"),
             AUTHOR,
@@ -93,7 +99,7 @@ def test_vote_requires_validated_vote_value(episode):
 
 
 def test_draft_cannot_receive_votes(draft):
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         cast(draft)
     assert draft.votes == ()
     assert draft.score is None
@@ -104,7 +110,7 @@ def test_draft_cannot_receive_votes(draft):
     "status", [TripStatus.PLANNED, TripStatus.COMPLETED, TripStatus.ARCHIVED]
 )
 def test_voting_requires_active_trip(episode, status):
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         cast(episode, status=status)
     assert episode.votes == ()
     assert episode.status is EpisodeStatus.VOTING
@@ -112,20 +118,20 @@ def test_voting_requires_active_trip(episode, status):
 
 @pytest.mark.parametrize("eligible", [ELIGIBLE, ELIGIBLE | {PROTAGONIST}])
 def test_protagonist_cannot_vote_even_if_supplied_as_eligible(episode, eligible):
-    with pytest.raises(ValueError):
+    with pytest.raises(NotAuthorized):
         cast(episode, voter=PROTAGONIST, eligible=eligible)
     assert episode.votes == ()
 
 
 def test_noneligible_user_cannot_vote(episode):
-    with pytest.raises(ValueError):
+    with pytest.raises(NotAuthorized):
         cast(episode, voter=UserId("outsider"))
     assert episode.votes == ()
 
 
 def test_duplicate_voter_is_rejected_without_replacing_vote(episode):
     first = cast(episode)
-    with pytest.raises(ValueError):
+    with pytest.raises(Duplicate):
         cast(episode, vote_id="new-id", value=1)
     assert episode.votes == (first,)
     assert episode.score is None
@@ -133,7 +139,7 @@ def test_duplicate_voter_is_rejected_without_replacing_vote(episode):
 
 def test_vote_id_cannot_be_reused_by_another_voter(episode):
     first = cast(episode)
-    with pytest.raises(ValueError):
+    with pytest.raises(Duplicate):
         cast(episode, voter=OTHER)
     assert episode.votes == (first,)
     assert not episode.has_vote_from(OTHER)
@@ -157,7 +163,7 @@ def test_completed_episode_rejects_further_votes(episode):
     cast(episode, eligible={AUTHOR})
     before = episode.votes
     score = episode.score
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         cast(episode, voter=OTHER, vote_id="late")
     assert episode.votes == before
     assert episode.score == score
@@ -166,7 +172,7 @@ def test_completed_episode_rejects_further_votes(episode):
 
 @pytest.mark.parametrize("eligible", [set(), {AUTHOR, PROTAGONIST}])
 def test_invalid_eligible_context_does_not_record_vote(episode, eligible):
-    with pytest.raises(ValueError):
+    with pytest.raises(NotAuthorized):
         cast(episode, eligible=eligible)
     assert episode.votes == ()
     cast(episode)
@@ -189,9 +195,9 @@ def test_votes_and_score_cannot_be_modified_externally(episode):
 
 def test_completed_episode_cannot_be_edited_or_resubmitted(episode):
     cast(episode, eligible={AUTHOR})
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         episode.submit(requested_by=AUTHOR, trip_status=TripStatus.ACTIVE)
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         episode.edit(
             requested_by=AUTHOR,
             title="Changed",

@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 
 from sillycation.domain.episode import Episode, EpisodeStatus, Vote
+from sillycation.domain.errors import Duplicate, InvalidData, InvalidState
 from sillycation.domain.identifiers import (
     EpisodeId,
     JoinRequestId,
@@ -106,7 +107,7 @@ def test_restored_planned_trip_keeps_working() -> None:
 def test_restored_active_trip_rejects_new_join_requests() -> None:
     trip = restore_trip(TripStatus.ACTIVE)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         trip.request_to_join(JoinRequestId("r1"), OTHER)
 
 
@@ -119,14 +120,14 @@ def test_restored_completed_trip_can_be_archived() -> None:
 
 
 def test_trip_restore_requires_creator_among_participants() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         restore_trip(participants=[MEMBER])
 
 
 def test_trip_restore_rejects_foreign_join_requests() -> None:
     foreign = JoinRequest(JoinRequestId("r1"), TripId("another"), OTHER)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         restore_trip(join_requests=[foreign])
 
 
@@ -187,7 +188,7 @@ def test_restored_voting_episode_completes_with_the_last_vote() -> None:
 def test_restored_voting_episode_rejects_a_second_vote_from_the_same_user() -> None:
     episode = restore_episode(EpisodeStatus.VOTING, [vote(CREATOR, 4)])
 
-    with pytest.raises(ValueError):
+    with pytest.raises(Duplicate):
         episode.cast_vote(
             VoteId("again"),
             CREATOR,
@@ -210,7 +211,7 @@ def test_completed_episode_is_restored_with_its_score() -> None:
 def test_restored_completed_episode_rejects_new_votes() -> None:
     episode = restore_episode(EpisodeStatus.COMPLETED, [vote(CREATOR, 5)])
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidState):
         episode.cast_vote(
             VoteId("late"),
             OTHER,
@@ -221,17 +222,17 @@ def test_restored_completed_episode_rejects_new_votes() -> None:
 
 
 def test_episode_restore_rejects_votes_on_a_draft() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         restore_episode(EpisodeStatus.DRAFT, [vote(CREATOR, 4)])
 
 
 def test_episode_restore_rejects_a_completed_episode_without_votes() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         restore_episode(EpisodeStatus.COMPLETED)
 
 
 def test_episode_restore_rejects_foreign_votes() -> None:
     foreign = vote(CREATOR, 4, episode=EpisodeId("another"))
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidData):
         restore_episode(EpisodeStatus.VOTING, [foreign])

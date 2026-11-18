@@ -2,16 +2,9 @@
 
 from sillycation.application.ports.passwords import PasswordHasher
 from sillycation.application.ports.repositories import UserRepository
+from sillycation.domain.errors import Duplicate, InvalidData, NotAuthorized
 from sillycation.domain.identifiers import UserId
 from sillycation.domain.user import User
-
-
-class DuplicateUserError(Exception):
-    """A registration identity, username or email is already in use."""
-
-
-class InvalidCredentialsError(Exception):
-    """The supplied credentials do not authenticate a user."""
 
 
 class RegisterUser:
@@ -29,13 +22,13 @@ class RegisterUser:
         technical dependency errors propagate without conversion.
         """
         if not isinstance(password, str) or not password.strip():
-            raise ValueError("Password is required")
+            raise InvalidData("Password is required")
         if self._users.get_by_id(user_id) is not None:
-            raise DuplicateUserError("User identity already exists")
+            raise Duplicate("User identity already exists")
         if self._users.exists_by_username(username):
-            raise DuplicateUserError("Username already exists")
+            raise Duplicate("Username already exists")
         if self._users.exists_by_email(email):
-            raise DuplicateUserError("Email already exists")
+            raise Duplicate("Email already exists")
         password_hash = self._passwords.hash(password)
         user = User(user_id, username, email, password_hash)
         return self._users.save(user).id
@@ -50,5 +43,5 @@ class AuthenticateUser:
         """Verify credentials without mutation; UserId is not a session credential."""
         user = self._users.get_by_username(username)
         if user is None or not self._passwords.verify(password, user.password_hash):
-            raise InvalidCredentialsError("Invalid credentials")
+            raise NotAuthorized("Invalid credentials")
         return user.id
