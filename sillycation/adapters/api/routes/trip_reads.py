@@ -2,7 +2,7 @@
 
 Intentionally NOT included in the public versioned router. Tests mount this
 router with dependency overrides. Existing use cases enforce creator/member
-permissions and draft visibility; errors propagate until step 3 is integrated.
+permissions and draft visibility; the factory translates typed errors to HTTP.
 """
 
 from typing import Annotated

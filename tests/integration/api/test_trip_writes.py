@@ -41,7 +41,6 @@ from sillycation.application.trip_use_cases import (
     RequestJoinTrip,
 )
 from sillycation.domain.episode import Episode
-from sillycation.domain.errors import InvalidState, NotAuthorized
 from sillycation.domain.identifiers import EpisodeId, JoinRequestId, TripId, UserId
 from sillycation.domain.trip import JoinRequest, Participant, Trip, TripStatus
 from sillycation.domain.user import User
@@ -332,13 +331,14 @@ def test_only_creator_can_manage_trip_and_query_or_body_cannot_spoof_actor(
     trip, trips, _, _, _ = data
     before = (trip.status, trip.participants, trip.join_requests)
     with TestClient(internal_app(data, actor)) as client:
-        with pytest.raises(NotAuthorized):
-            client.post(
-                path,
-                params={"requested_by": "creator"},
-                json={"requested_by": "creator"},
-                headers={"X-User-ID": "creator"},
-            )
+        response = client.post(
+            path,
+            params={"requested_by": "creator"},
+            json={"requested_by": "creator"},
+            headers={"X-User-ID": "creator"},
+        )
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "not_authorized"
     assert (trip.status, trip.participants, trip.join_requests) == before
     trips.save.assert_not_called()
 
@@ -346,25 +346,30 @@ def test_only_creator_can_manage_trip_and_query_or_body_cannot_spoof_actor(
 def test_domain_rejects_inverted_period_without_saving(data) -> None:
     _, trips, _, _, _ = data
     with TestClient(internal_app(data)) as client:
-        with pytest.raises(ValueError):
-            client.post("/api/v1/trips", json={**BODY, "end_date": "2026-11-09"})
+        response = client.post("/api/v1/trips", json={**BODY, "end_date": "2026-11-09"})
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "invalid_data"
     trips.save.assert_not_called()
 
 
-def test_overlap_on_create_propagates_without_temporary_http_mapping(data) -> None:
+def test_overlap_on_create_returns_invalid_state(data) -> None:
     trip, trips, _, _, _ = data
     trips.find_active_or_planned_trips_by_participant.return_value = [trip]
     with TestClient(internal_app(data)) as client:
-        with pytest.raises(InvalidState):
-            client.post("/api/v1/trips", json=BODY)
+        response = client.post("/api/v1/trips", json=BODY)
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "invalid_state"
     trips.save.assert_not_called()
 
 
-def test_unknown_invitation_propagates_lookup_error(data) -> None:
+def test_unknown_invitation_returns_not_found(data) -> None:
     _, trips, _, _, _ = data
     with TestClient(internal_app(data, APPLICANT)) as client:
-        with pytest.raises(LookupError):
-            client.post("/api/v1/join-requests", json={"invitation_code": "UNKNOWN"})
+        response = client.post(
+            "/api/v1/join-requests", json={"invitation_code": "UNKNOWN"}
+        )
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "not_found"
     trips.save.assert_not_called()
 
 
@@ -386,8 +391,9 @@ def test_server_clock_cannot_be_overridden_to_activate_early(data) -> None:
     app = internal_app(data)
     app.dependency_overrides[get_current_date] = lambda: DAY - timedelta(days=1)
     with TestClient(app) as client:
-        with pytest.raises(ValueError):
-            client.post("/api/v1/trips/trip/activate?current_date=2099-01-01")
+        response = client.post("/api/v1/trips/trip/activate?current_date=2099-01-01")
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "invalid_state"
     assert trip.status is TripStatus.PLANNED
     trips.save.assert_not_called()
 
@@ -399,8 +405,9 @@ def test_completion_delegates_unresolved_episode_check(data) -> None:
         Episode(EpisodeId("draft"), trip.id, CREATOR, MEMBER, "Title", "Details", DAY)
     ]
     with TestClient(internal_app(data)) as client:
-        with pytest.raises(ValueError):
-            client.post("/api/v1/trips/trip/complete")
+        response = client.post("/api/v1/trips/trip/complete")
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "invalid_state"
     assert trip.status is TripStatus.ACTIVE
     episodes.find_unresolved_by_trip.assert_called_once_with(trip.id)
     trips.save.assert_not_called()
@@ -416,11 +423,12 @@ def test_completion_delegates_unresolved_episode_check(data) -> None:
         "/api/v1/trips/trip/archive",
     ],
 )
-def test_unknown_trip_propagates_without_saving(data, path) -> None:
+def test_unknown_trip_returns_not_found_without_saving(data, path) -> None:
     _, trips, _, _, _ = data
     with TestClient(internal_app(data)) as client:
-        with pytest.raises(LookupError):
-            client.post(path.replace("/trips/trip/", "/trips/missing/"))
+        response = client.post(path.replace("/trips/trip/", "/trips/missing/"))
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "not_found"
     trips.save.assert_not_called()
 
 

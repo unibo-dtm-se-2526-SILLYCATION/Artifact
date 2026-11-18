@@ -1,7 +1,7 @@
 """Internal HTTP reads with real use cases and test-only identity overrides.
 
-The production factory never mounts these routes. Permission/lookup exceptions
-are intentionally asserted as propagated exceptions until step 3 is available.
+The production factory never mounts these routes. Typed errors are translated
+by the factory handlers even when the router is mounted only for testing.
 """
 
 from datetime import date
@@ -234,17 +234,19 @@ def test_non_member_cannot_spoof_identity_to_bypass_use_case_authorization(
 ) -> None:
     trips, episodes = data
     with TestClient(internal_app(data, OUTSIDER)) as client:
-        # The exception is not translated yet: no text-based mapping is introduced.
-        with pytest.raises(PermissionError):
-            client.get(
-                path,
-                params={
-                    "actor": "creator",
-                    "requested_by": "creator",
-                    "user_id": "creator",
-                },
-                headers={"X-User-ID": "creator"},
-            )
+        response = client.get(
+            path,
+            params={
+                "actor": "creator",
+                "requested_by": "creator",
+                "user_id": "creator",
+            },
+            headers={"X-User-ID": "creator"},
+        )
+        assert response.status_code == 403
+        assert response.json() == {
+            "error": {"code": "not_authorized", "message": "Operation not permitted."}
+        }
     episodes.find_by_trip.assert_not_called()
     trips.save.assert_not_called()
 
@@ -252,8 +254,9 @@ def test_non_member_cannot_spoof_identity_to_bypass_use_case_authorization(
 @pytest.mark.parametrize("path", PATHS[1:3])
 def test_ordinary_member_cannot_read_creator_only_data(data, path) -> None:
     with TestClient(internal_app(data, MEMBER)) as client:
-        with pytest.raises(PermissionError):
-            client.get(path, params={"requested_by": "creator"})
+        response = client.get(path, params={"requested_by": "creator"})
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "not_authorized"
 
 
 @pytest.mark.parametrize(
@@ -267,12 +270,13 @@ def test_ordinary_member_cannot_read_creator_only_data(data, path) -> None:
         "dashboard",
     ],
 )
-def test_unknown_trip_propagates_lookup_error_without_guessing_http_mapping(
-    data, suffix
-) -> None:
+def test_unknown_trip_returns_not_found(data, suffix) -> None:
     with TestClient(internal_app(data)) as client:
-        with pytest.raises(LookupError):
-            client.get("/api/v1/trips/missing/" + suffix)
+        response = client.get("/api/v1/trips/missing/" + suffix)
+        assert response.status_code == 404
+        assert response.json() == {
+            "error": {"code": "not_found", "message": "Resource not found."}
+        }
 
 
 def test_use_case_can_be_overridden_and_query_does_not_select_actor() -> None:

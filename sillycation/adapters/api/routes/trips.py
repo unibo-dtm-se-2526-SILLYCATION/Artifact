@@ -1,7 +1,7 @@
 """Protected trip writes, intentionally not mounted by the public factory.
 
 Tests mount this router under /api/v1 with verified-identity overrides.
-Domain/application exceptions propagate until HTTP error integration is ready.
+The factory translates typed domain/application errors to HTTP responses.
 All business decisions, including approval rejection on overlap, remain in use
 cases. Activation/completion use the server clock, never a client-supplied date.
 """
