@@ -26,6 +26,7 @@ from sillycation.application.episode_use_cases import (
     EditEpisode,
     SubmitEpisode,
 )
+from sillycation.application.ports.passwords import PasswordHasher
 from sillycation.application.ports.repositories import (
     EpisodeRepository,
     TripRepository,
@@ -47,6 +48,7 @@ from sillycation.application.trip_use_cases import (
     RejectJoinRequest,
     RequestJoinTrip,
 )
+from sillycation.application.user_use_cases import RegisterUser
 from sillycation.application.voting_use_cases import CastVote
 from sillycation.domain.identifiers import (
     EpisodeId,
@@ -84,6 +86,15 @@ def get_user_repository() -> UserRepository:
     raise RuntimeError("UserRepository provider has not been configured")
 
 
+def get_password_hasher() -> PasswordHasher:
+    """Require a real hasher from the composition root; no insecure fallback."""
+    raise RuntimeError("PasswordHasher provider has not been configured")
+
+
+def get_new_user_id() -> UserId:
+    return UserId(uuid4().hex)
+
+
 def get_new_trip_id() -> TripId:
     return TripId(uuid4().hex)
 
@@ -115,6 +126,7 @@ EpisodeRepositoryDependency = Annotated[
     EpisodeRepository, Depends(get_episode_repository)
 ]
 UserRepositoryDependency = Annotated[UserRepository, Depends(get_user_repository)]
+PasswordHasherDependency = Annotated[PasswordHasher, Depends(get_password_hasher)]
 
 
 def get_list_my_trips(trips: TripRepositoryDependency) -> ListMyTrips:
@@ -213,3 +225,9 @@ def get_cast_vote(
     trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
 ) -> CastVote:
     return CastVote(trips, episodes)
+
+
+def get_register_user(
+    users: UserRepositoryDependency, passwords: PasswordHasherDependency
+) -> RegisterUser:
+    return RegisterUser(users, passwords)
