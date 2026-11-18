@@ -314,3 +314,82 @@ def test_overrides_are_not_shared_with_the_public_factory(data) -> None:
     public = create_app()
     assert public.dependency_overrides == {}
     assert public.openapi()["paths"] == {}
+
+
+@pytest.mark.parametrize("reverse_order", [False, True])
+def test_ranking_sums_completed_episodes_and_preserves_nontrivial_ties(
+    data, reverse_order
+) -> None:
+    trips, episodes = data
+    trip = Trip(
+        TripId("trip"),
+        "Ranking",
+        CREATOR,
+        TripPeriod(DAY, DAY),
+        InvitationCode("RANKING"),
+    )
+    tied = UserId("tied")
+    last = UserId("last")
+    for member in (MEMBER, tied, last):
+        request = JoinRequestId(member.value)
+        trip.request_to_join(request, member)
+        trip.approve_join_request(request, requested_by=CREATOR)
+    trip.activate(requested_by=CREATOR, current_date=DAY)
+    completed = []
+    for index, (protagonist, value) in enumerate(
+        [(CREATOR, 4), (CREATOR, 3), (MEMBER, 5), (tied, 2), (tied, 3)]
+    ):
+        episode = Episode(
+            EpisodeId(str(index)),
+            trip.id,
+            CREATOR,
+            protagonist,
+            "Title",
+            "Details",
+            DAY,
+        )
+        episode.submit(requested_by=CREATOR, trip_status=trip.status)
+        voters = {participant.user_id for participant in trip.participants} - {
+            protagonist
+        }
+        for voter in sorted(voters, key=lambda item: item.value):
+            episode.cast_vote(
+                VoteId(str(index) + voter.value),
+                voter,
+                VoteValue(value),
+                eligible_voters=voters,
+                trip_status=trip.status,
+            )
+        completed.append(episode)
+    unfinished = Episode(
+        EpisodeId("unfinished"), trip.id, CREATOR, last, "Pending", "Details", DAY
+    )
+    unfinished.submit(requested_by=CREATOR, trip_status=trip.status)
+    unfinished.cast_vote(
+        VoteId("partial"),
+        CREATOR,
+        VoteValue(5),
+        eligible_voters={CREATOR, MEMBER, tied},
+        trip_status=trip.status,
+    )
+    stored_episodes = [*completed, unfinished]
+    trips.get_by_id.side_effect = lambda identity: trip if identity == trip.id else None
+    episodes.find_by_trip.side_effect = lambda identity: (
+        (list(reversed(stored_episodes)) if reverse_order else stored_episodes)
+        if identity == trip.id
+        else []
+    )
+    expected = [
+        {"user_id": "creator", "score": "7", "position": 1},
+        {"user_id": "member", "score": "5", "position": 2},
+        {"user_id": "tied", "score": "5", "position": 2},
+        {"user_id": "last", "score": "0", "position": 4},
+    ]
+    with TestClient(internal_app(data)) as client:
+        ranking = client.get("/api/v1/trips/trip/ranking")
+        dashboard = client.get("/api/v1/trips/trip/dashboard")
+    assert ranking.status_code == dashboard.status_code == 200
+    assert ranking.json() == expected
+    assert dashboard.json()["ranking"] == expected
+    trips.save.assert_not_called()
+    episodes.save.assert_not_called()

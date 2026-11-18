@@ -40,7 +40,7 @@ from sillycation.application.trip_use_cases import (
     RejectJoinRequest,
     RequestJoinTrip,
 )
-from sillycation.domain.episode import Episode
+from sillycation.domain.episode import Episode, EpisodeStatus
 from sillycation.domain.identifiers import EpisodeId, JoinRequestId, TripId, UserId
 from sillycation.domain.trip import JoinRequest, Participant, Trip, TripStatus
 from sillycation.domain.user import User
@@ -398,11 +398,22 @@ def test_server_clock_cannot_be_overridden_to_activate_early(data) -> None:
     trips.save.assert_not_called()
 
 
-def test_completion_delegates_unresolved_episode_check(data) -> None:
+@pytest.mark.parametrize("status", list(EpisodeStatus)[:-1])
+def test_completion_delegates_unresolved_episode_check(data, status) -> None:
     trip, trips, _, episodes, _ = data
     trip.activate(requested_by=CREATOR, current_date=DAY)
     episodes.find_unresolved_by_trip.return_value = [
-        Episode(EpisodeId("draft"), trip.id, CREATOR, MEMBER, "Title", "Details", DAY)
+        Episode.restore(
+            id=EpisodeId("unresolved"),
+            trip_id=trip.id,
+            author_id=CREATOR,
+            protagonist_id=MEMBER,
+            title="Title",
+            description="Details",
+            date=DAY,
+            status=status,
+            votes=(),
+        )
     ]
     with TestClient(internal_app(data)) as client:
         response = client.post("/api/v1/trips/trip/complete")
@@ -464,3 +475,107 @@ def test_internal_openapi_exposes_no_actor_clock_or_generated_ids(data) -> None:
         assert names <= {"trip_id", "request_id"}
     assert create_app().openapi()["paths"] == {}
     assert create_app().dependency_overrides == {}
+
+
+@pytest.mark.parametrize("actor", [APPLICANT, MEMBER])
+def test_duplicate_join_request_or_existing_membership_is_rejected(data, actor) -> None:
+    trip, trips, _, _, _ = data
+    before = (trip.participants, trip.join_requests)
+    with TestClient(internal_app(data, actor)) as client:
+        response = client.post(
+            "/api/v1/join-requests", json={"invitation_code": "CODE"}
+        )
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": {"code": "duplicate", "message": "Resource or action already exists."}
+    }
+    assert (trip.participants, trip.join_requests) == before
+    trips.save.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "status", [TripStatus.ACTIVE, TripStatus.COMPLETED, TripStatus.ARCHIVED]
+)
+def test_join_request_is_rejected_after_planned_state(data, status) -> None:
+    trip, trips, _, _, _ = data
+    trip.activate(requested_by=CREATOR, current_date=DAY)
+    if status in (TripStatus.COMPLETED, TripStatus.ARCHIVED):
+        trip.complete(
+            requested_by=CREATOR, current_date=DAY, has_unresolved_episodes=False
+        )
+    if status is TripStatus.ARCHIVED:
+        trip.archive(requested_by=CREATOR)
+    before = (trip.participants, trip.join_requests)
+    with TestClient(internal_app(data, UserId("new-applicant"))) as client:
+        response = client.post(
+            "/api/v1/join-requests", json={"invitation_code": "CODE"}
+        )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "invalid_state"
+    assert trip.status is status
+    assert (trip.participants, trip.join_requests) == before
+    trips.save.assert_not_called()
+
+
+@pytest.mark.parametrize("active_conflict", [False, True])
+def test_join_request_with_overlapping_trip_is_rejected(data, active_conflict) -> None:
+    trip, trips, _, _, _ = data
+    applicant = UserId("new-applicant")
+    conflict = Trip(
+        TripId("conflict"), "Conflict", applicant, trip.period, InvitationCode("OTHER")
+    )
+    if active_conflict:
+        conflict.request_to_join(JoinRequestId("other-member"), MEMBER)
+        conflict.approve_join_request(
+            JoinRequestId("other-member"), requested_by=applicant
+        )
+        conflict.activate(requested_by=applicant, current_date=DAY)
+    trips.find_active_or_planned_trips_by_participant.return_value = [conflict]
+    before = (trip.participants, trip.join_requests)
+    with TestClient(internal_app(data, applicant)) as client:
+        response = client.post(
+            "/api/v1/join-requests", json={"invitation_code": "CODE"}
+        )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "invalid_state"
+    trips.find_active_or_planned_trips_by_participant.assert_called_once_with(applicant)
+    assert (trip.participants, trip.join_requests) == before
+    trips.save.assert_not_called()
+
+
+def test_activation_requires_at_least_two_participants(data) -> None:
+    _, trips, _, _, stored = data
+    trip = Trip(
+        TripId("trip"), "Solo", CREATOR, TripPeriod(DAY, DAY), InvitationCode("SOLO")
+    )
+    stored[trip.id] = trip
+    with TestClient(internal_app(data)) as client:
+        response = client.post("/api/v1/trips/trip/activate")
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "invalid_state"
+    assert trip.status is TripStatus.PLANNED
+    assert trip.participants == {Participant(trip.id, CREATOR)}
+    trips.save.assert_not_called()
+
+
+def test_completion_before_end_date_ignores_client_clock(data) -> None:
+    _, trips, _, episodes, stored = data
+    trip = Trip(
+        TripId("trip"),
+        "Long trip",
+        CREATOR,
+        TripPeriod(DAY, DAY + timedelta(days=1)),
+        InvitationCode("LONG"),
+    )
+    trip.request_to_join(JoinRequestId("member"), MEMBER)
+    trip.approve_join_request(JoinRequestId("member"), requested_by=CREATOR)
+    trip.activate(requested_by=CREATOR, current_date=DAY)
+    stored[trip.id] = trip
+    app = internal_app(data)
+    with TestClient(app) as client:
+        response = client.post("/api/v1/trips/trip/complete?current_date=2099-01-01")
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "invalid_state"
+    assert trip.status is TripStatus.ACTIVE
+    episodes.find_unresolved_by_trip.assert_called_once_with(trip.id)
+    trips.save.assert_not_called()
