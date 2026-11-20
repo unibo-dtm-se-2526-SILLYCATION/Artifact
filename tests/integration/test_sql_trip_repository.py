@@ -7,6 +7,7 @@ from sqlalchemy import Engine
 
 from sillycation.adapters.persistence.database import create_database
 from sillycation.adapters.persistence.trip_repository import SqlAlchemyTripRepository
+from sillycation.adapters.persistence.user_repository import SqlAlchemyUserRepository
 from sillycation.application.ports.repositories import TripRepository
 from sillycation.domain.errors import InvalidState
 from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
@@ -17,6 +18,7 @@ from sillycation.domain.trip import (
     Trip,
     TripStatus,
 )
+from sillycation.domain.user import User
 from sillycation.domain.value_objects import InvitationCode, TripPeriod
 
 
@@ -29,7 +31,16 @@ END = date(2026, 11, 12)
 
 @pytest.fixture
 def trips(engine: Engine) -> TripRepository:
+    seed_users(engine)
     return SqlAlchemyTripRepository(engine)
+
+
+def seed_users(engine: Engine) -> None:
+    users = SqlAlchemyUserRepository(engine)
+    for identity in (CREATOR, MEMBER, APPLICANT):
+        users.save(
+            User(identity, identity.value, identity.value + "@example.org", "hash")
+        )
 
 
 def make_trip(key: str = "trip", status: TripStatus = TripStatus.PLANNED) -> Trip:
@@ -196,6 +207,7 @@ def test_find_active_or_planned_excludes_completed_and_archived_trips(
 def test_trips_survive_an_application_restart(database_url: str) -> None:
     trip = make_trip(status=TripStatus.ACTIVE)
     first_run = create_database(database_url)
+    seed_users(first_run)
     SqlAlchemyTripRepository(first_run).save(trip)
     first_run.dispose()
 

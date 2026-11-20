@@ -2,7 +2,7 @@
 
 from typing import Optional, Sequence
 
-from sqlalchemy import ColumnElement, Engine, delete, insert, select
+from sqlalchemy import ColumnElement, Engine, delete, insert, select, update
 
 from sillycation.adapters.persistence.tables import join_requests, participants, trips
 from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
@@ -14,8 +14,8 @@ class SqlAlchemyTripRepository:
     """Implements the TripRepository port.
 
     A Trip is stored and loaded as a whole, together with its participants and
-    join requests. Saving replaces every stored row of that Trip inside one
-    transaction, so the database never holds a partially saved Trip.
+    join requests. Saving preserves the parent row and replaces its owned rows
+    inside one transaction, so references from Episodes remain valid.
     """
 
     def __init__(self, engine: Engine) -> None:
@@ -24,24 +24,29 @@ class SqlAlchemyTripRepository:
     def save(self, trip: Trip) -> Trip:
         trip_id = trip.id.value
         with self._engine.begin() as connection:
+            values = dict(
+                name=trip.name,
+                description=trip.description,
+                creator_id=trip.creator_id.value,
+                start_date=trip.period.start_date,
+                end_date=trip.period.end_date,
+                invitation_code=trip.invitation_code.value,
+                status=trip.status.value,
+            )
+            exists = connection.execute(
+                select(trips.c.id).where(trips.c.id == trip_id)
+            ).first()
+            if exists is None:
+                connection.execute(insert(trips).values(id=trip_id, **values))
+            else:
+                connection.execute(
+                    update(trips).where(trips.c.id == trip_id).values(**values)
+                )
             connection.execute(
                 delete(participants).where(participants.c.trip_id == trip_id)
             )
             connection.execute(
                 delete(join_requests).where(join_requests.c.trip_id == trip_id)
-            )
-            connection.execute(delete(trips).where(trips.c.id == trip_id))
-            connection.execute(
-                insert(trips).values(
-                    id=trip_id,
-                    name=trip.name,
-                    description=trip.description,
-                    creator_id=trip.creator_id.value,
-                    start_date=trip.period.start_date,
-                    end_date=trip.period.end_date,
-                    invitation_code=trip.invitation_code.value,
-                    status=trip.status.value,
-                )
             )
             connection.execute(
                 insert(participants),

@@ -10,12 +10,21 @@ from sillycation.adapters.persistence.database import create_database
 from sillycation.adapters.persistence.episode_repository import (
     SqlAlchemyEpisodeRepository,
 )
+from sillycation.adapters.persistence.trip_repository import SqlAlchemyTripRepository
+from sillycation.adapters.persistence.user_repository import SqlAlchemyUserRepository
 from sillycation.application.ports.repositories import EpisodeRepository
 from sillycation.domain.episode import Episode, EpisodeStatus
 from sillycation.domain.errors import NotFound
-from sillycation.domain.identifiers import EpisodeId, TripId, UserId, VoteId
-from sillycation.domain.trip import TripStatus
-from sillycation.domain.value_objects import VoteValue
+from sillycation.domain.identifiers import (
+    EpisodeId,
+    JoinRequestId,
+    TripId,
+    UserId,
+    VoteId,
+)
+from sillycation.domain.trip import Trip, TripStatus
+from sillycation.domain.user import User
+from sillycation.domain.value_objects import InvitationCode, TripPeriod, VoteValue
 
 
 TRIP = TripId("trip")
@@ -28,7 +37,31 @@ DAY = date(2026, 11, 10)
 
 @pytest.fixture
 def episodes(engine: Engine) -> EpisodeRepository:
+    seed_parents(engine)
     return SqlAlchemyEpisodeRepository(engine)
+
+
+def seed_parents(engine: Engine) -> None:
+    users = SqlAlchemyUserRepository(engine)
+    for identity in (AUTHOR, PROTAGONIST, OTHER):
+        users.save(
+            User(identity, identity.value, identity.value + "@example.org", "hash")
+        )
+    trips = SqlAlchemyTripRepository(engine)
+    for key in ("trip", "another"):
+        trip = Trip(
+            TripId(key),
+            key,
+            AUTHOR,
+            TripPeriod(DAY, date(2026, 11, 11)),
+            InvitationCode(key),
+        )
+        for member in (PROTAGONIST, OTHER):
+            request = JoinRequestId(key + "-" + member.value)
+            trip.request_to_join(request, member)
+            trip.approve_join_request(request, requested_by=AUTHOR)
+        trip.activate(requested_by=AUTHOR, current_date=DAY)
+        trips.save(trip)
 
 
 def cast(episode: Episode, voter: UserId, value: int) -> None:
@@ -203,6 +236,7 @@ def test_find_unresolved_by_trip_excludes_completed_episodes(
 def test_episodes_survive_an_application_restart(database_url: str) -> None:
     episode = make_episode(status=EpisodeStatus.COMPLETED)
     first_run = create_database(database_url)
+    seed_parents(first_run)
     SqlAlchemyEpisodeRepository(first_run).save(episode)
     first_run.dispose()
 
