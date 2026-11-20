@@ -4,6 +4,7 @@ from typing import Optional
 
 from sqlalchemy import ColumnElement, Engine, insert, select, update
 
+from sillycation.adapters.persistence._connection import RepositoryContext
 from sillycation.adapters.persistence.tables import users
 from sillycation.domain.identifiers import UserId
 from sillycation.domain.user import User
@@ -16,11 +17,13 @@ class SqlAlchemyUserRepository:
     duplicate raises sqlalchemy.exc.IntegrityError.
     """
 
-    def __init__(self, engine: Engine) -> None:
-        self._engine = engine
+    def __init__(
+        self, engine: Engine, *, _context: Optional[RepositoryContext] = None
+    ) -> None:
+        self._context = _context if _context is not None else RepositoryContext(engine)
 
     def save(self, user: User) -> User:
-        with self._engine.begin() as connection:
+        with self._context.begin() as connection:
             values = dict(
                 username=user.username,
                 email=user.email,
@@ -53,7 +56,7 @@ class SqlAlchemyUserRepository:
         return self.get_by_email(email) is not None
 
     def _find(self, condition: ColumnElement[bool]) -> Optional[User]:
-        with self._engine.connect() as connection:
+        with self._context.connect() as connection:
             row = connection.execute(select(users).where(condition)).first()
         if row is None:
             return None
