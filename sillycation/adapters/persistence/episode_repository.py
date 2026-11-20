@@ -4,6 +4,7 @@ from typing import Optional, Sequence
 
 from sqlalchemy import ColumnElement, Engine, delete, insert, select
 
+from sillycation.adapters.persistence._connection import RepositoryContext
 from sillycation.adapters.persistence.tables import episodes, votes
 from sillycation.domain.episode import Episode, EpisodeStatus, Vote
 from sillycation.domain.errors import NotFound
@@ -25,12 +26,14 @@ class SqlAlchemyEpisodeRepository:
     is not stored: Episode.restore recomputes it from the votes.
     """
 
-    def __init__(self, engine: Engine) -> None:
-        self._engine = engine
+    def __init__(
+        self, engine: Engine, *, _context: Optional[RepositoryContext] = None
+    ) -> None:
+        self._context = _context if _context is not None else RepositoryContext(engine)
 
     def save(self, episode: Episode) -> Episode:
         episode_id = episode.id.value
-        with self._engine.begin() as connection:
+        with self._context.begin() as connection:
             connection.execute(delete(votes).where(votes.c.episode_id == episode_id))
             connection.execute(delete(episodes).where(episodes.c.id == episode_id))
             connection.execute(
@@ -61,7 +64,7 @@ class SqlAlchemyEpisodeRepository:
         return episode
 
     def delete(self, episode_id: EpisodeId) -> None:
-        with self._engine.begin() as connection:
+        with self._context.begin() as connection:
             connection.execute(
                 delete(votes).where(votes.c.episode_id == episode_id.value)
             )
@@ -86,7 +89,7 @@ class SqlAlchemyEpisodeRepository:
 
     def _load(self, condition: ColumnElement[bool]) -> list[Episode]:
         """Read the matching episodes with two queries, whatever their number."""
-        with self._engine.connect() as connection:
+        with self._context.connect() as connection:
             episode_rows = connection.execute(
                 select(episodes).where(condition).order_by(episodes.c.id)
             ).all()

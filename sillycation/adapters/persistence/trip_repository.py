@@ -4,6 +4,7 @@ from typing import Optional, Sequence
 
 from sqlalchemy import ColumnElement, Engine, delete, insert, select, update
 
+from sillycation.adapters.persistence._connection import RepositoryContext
 from sillycation.adapters.persistence.tables import join_requests, participants, trips
 from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
 from sillycation.domain.trip import JoinRequest, JoinRequestStatus, Trip, TripStatus
@@ -18,12 +19,14 @@ class SqlAlchemyTripRepository:
     inside one transaction, so references from Episodes remain valid.
     """
 
-    def __init__(self, engine: Engine) -> None:
-        self._engine = engine
+    def __init__(
+        self, engine: Engine, *, _context: Optional[RepositoryContext] = None
+    ) -> None:
+        self._context = _context if _context is not None else RepositoryContext(engine)
 
     def save(self, trip: Trip) -> Trip:
         trip_id = trip.id.value
-        with self._engine.begin() as connection:
+        with self._context.begin() as connection:
             values = dict(
                 name=trip.name,
                 description=trip.description,
@@ -98,7 +101,7 @@ class SqlAlchemyTripRepository:
 
     def _load(self, condition: ColumnElement[bool]) -> list[Trip]:
         """Read the matching trips with three queries, whatever their number."""
-        with self._engine.connect() as connection:
+        with self._context.connect() as connection:
             trip_rows = connection.execute(
                 select(trips).where(condition).order_by(trips.c.id)
             ).all()
