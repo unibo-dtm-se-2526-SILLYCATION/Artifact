@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from sqlalchemy import ColumnElement, Engine, delete, insert, select
+from sqlalchemy import ColumnElement, Engine, insert, select, update
 
 from sillycation.adapters.persistence.tables import users
 from sillycation.domain.identifiers import UserId
@@ -21,15 +21,20 @@ class SqlAlchemyUserRepository:
 
     def save(self, user: User) -> User:
         with self._engine.begin() as connection:
-            connection.execute(delete(users).where(users.c.id == user.id.value))
-            connection.execute(
-                insert(users).values(
-                    id=user.id.value,
-                    username=user.username,
-                    email=user.email,
-                    password_hash=user.password_hash,
-                )
+            values = dict(
+                username=user.username,
+                email=user.email,
+                password_hash=user.password_hash,
             )
+            exists = connection.execute(
+                select(users.c.id).where(users.c.id == user.id.value)
+            ).first()
+            if exists is None:
+                connection.execute(insert(users).values(id=user.id.value, **values))
+            else:
+                connection.execute(
+                    update(users).where(users.c.id == user.id.value).values(**values)
+                )
         return user
 
     def get_by_id(self, user_id: UserId) -> Optional[User]:
