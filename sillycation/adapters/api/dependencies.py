@@ -1,20 +1,12 @@
-"""Dependency graph for the upcoming protected endpoints.
+"""HTTP dependencies backed by application ports configured in the lifespan."""
 
-The composition root must override repository providers before wiring routes.
-Tests use app.dependency_overrides with the same functions. Nothing opens a DB
-at import or app creation time. Missing configuration fails explicitly; no
-fake identities or implicit repository instances are provided.
-
-Repository lifetime and write transactions await persistence integration.
-Authenticated identity and credential providers belong to step 15.
-"""
-
+from dataclasses import dataclass
 from datetime import date
 from secrets import token_urlsafe
-from typing import Annotated
+from typing import Annotated, Callable, Optional
 from uuid import uuid4
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 
 from sillycation.application.episode_read_use_cases import (
     GetTripDashboard,
@@ -32,6 +24,7 @@ from sillycation.application.ports.repositories import (
     TripRepository,
     UserRepository,
 )
+from sillycation.application.ports.unit_of_work import UnitOfWork
 from sillycation.application.ranking_use_cases import GetParticipantRanking
 from sillycation.application.trip_read_use_cases import (
     GetPendingJoinRequests,
@@ -74,16 +67,37 @@ def get_authenticated_user_id() -> UserId:
     )
 
 
-def get_trip_repository() -> TripRepository:
-    raise RuntimeError("TripRepository provider has not been configured")
+@dataclass(frozen=True)
+class PersistenceDependencies:
+    users: UserRepository
+    trips: TripRepository
+    episodes: EpisodeRepository
+    unit_of_work_factory: Callable[[], UnitOfWork]
 
 
-def get_episode_repository() -> EpisodeRepository:
-    raise RuntimeError("EpisodeRepository provider has not been configured")
+def _get_persistence(request: Request) -> PersistenceDependencies:
+    persistence: Optional[PersistenceDependencies] = getattr(
+        request.app.state, "persistence", None
+    )
+    if persistence is None:
+        raise RuntimeError("Persistence has not been configured by the app lifespan")
+    return persistence
 
 
-def get_user_repository() -> UserRepository:
-    raise RuntimeError("UserRepository provider has not been configured")
+def get_trip_repository(request: Request) -> TripRepository:
+    return _get_persistence(request).trips
+
+
+def get_episode_repository(request: Request) -> EpisodeRepository:
+    return _get_persistence(request).episodes
+
+
+def get_user_repository(request: Request) -> UserRepository:
+    return _get_persistence(request).users
+
+
+def get_unit_of_work_factory(request: Request) -> Callable[[], UnitOfWork]:
+    return _get_persistence(request).unit_of_work_factory
 
 
 def get_password_hasher() -> PasswordHasher:

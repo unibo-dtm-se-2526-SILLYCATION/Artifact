@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from unittest.mock import Mock
 from uuid import UUID
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 import pytest
 
@@ -462,7 +463,7 @@ def test_providers_allocate_server_owned_values_and_repository_is_explicit(
     monkeypatch.setattr("sillycation.adapters.api.dependencies.date", FixedDate)
     assert get_current_date() == DAY
     with pytest.raises(RuntimeError):
-        get_user_repository()
+        get_user_repository(Request({"type": "http", "app": create_app()}))
 
 
 def test_internal_openapi_exposes_no_actor_clock_or_generated_ids(data) -> None:

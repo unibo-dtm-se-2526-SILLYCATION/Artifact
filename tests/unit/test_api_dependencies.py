@@ -4,7 +4,7 @@ from datetime import date
 from typing import Annotated
 from unittest.mock import Mock
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.testclient import TestClient
 import pytest
 
@@ -48,7 +48,7 @@ def repository_mocks() -> tuple[Mock, Mock, Trip]:
 @pytest.mark.parametrize("provider", [get_trip_repository, get_episode_repository])
 def test_missing_repository_configuration_fails_explicitly(provider) -> None:
     with pytest.raises(RuntimeError, match="has not been configured"):
-        provider()
+        provider(Request({"type": "http", "app": create_app()}))
 
 
 def test_read_providers_construct_existing_use_cases_with_supplied_ports() -> None:
@@ -86,9 +86,9 @@ def test_read_providers_construct_existing_use_cases_with_supplied_ports() -> No
     episodes.save.assert_not_called()
 
 
-def test_fastapi_can_override_repository_dependencies_per_application() -> None:
+def test_fastapi_can_override_repository_dependencies_per_application(tmp_path) -> None:
     trips, episodes, trip = repository_mocks()
-    app = create_app()
+    app = create_app(database_url=f"sqlite:///{tmp_path / 'api.db'}")
 
     @app.get("/probe", response_model=TripDashboardResponse)
     def probe(
@@ -110,13 +110,13 @@ def test_fastapi_can_override_repository_dependencies_per_application() -> None:
     assert create_app().openapi()["paths"] == {}
 
 
-def test_fastapi_can_override_an_entire_use_case() -> None:
+def test_fastapi_can_override_an_entire_use_case(tmp_path) -> None:
     trips, episodes, trip = repository_mocks()
     use_case = Mock(spec=GetTripDashboard)
     use_case.execute.return_value = get_trip_dashboard(trips, episodes).execute(
         trip_id=trip.id, requested_by=trip.creator_id
     )
-    app = create_app()
+    app = create_app(database_url=f"sqlite:///{tmp_path / 'api.db'}")
 
     @app.get("/probe", response_model=TripDashboardResponse)
     def probe(
@@ -126,7 +126,7 @@ def test_fastapi_can_override_an_entire_use_case() -> None:
             dependency.execute(trip_id=trip.id, requested_by=trip.creator_id)
         )
 
-    # The unconfigured repository sub-dependencies must not be invoked.
+    # Overriding the use case bypasses its repository dependencies.
     app.dependency_overrides[get_trip_dashboard] = lambda: use_case
     with TestClient(app) as client:
         assert client.get("/probe").status_code == 200
