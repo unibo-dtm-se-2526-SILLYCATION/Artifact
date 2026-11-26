@@ -11,6 +11,14 @@ DATABASE_URL_VARIABLE = "SILLYCATION_DATABASE_URL"
 DEFAULT_DATABASE_URL = "sqlite:///sillycation.db"
 
 
+def resolve_database_url(url: Optional[str] = None) -> str:
+    return (
+        os.environ.get(DATABASE_URL_VARIABLE, DEFAULT_DATABASE_URL)
+        if url is None
+        else url
+    )
+
+
 def _enable_sqlite_foreign_keys(connection: Any, connection_record: Any) -> None:
     """Configure each physical connection before schema creation or SQL use."""
     has_autocommit = hasattr(connection, "autocommit")
@@ -35,10 +43,12 @@ def create_database(url: Optional[str] = None) -> Engine:
     SILLYCATION_DATABASE_URL, otherwise it is a local SQLite file. Existing
     tables and their data are left untouched, so this is safe at every start.
     """
-    if url is None:
-        url = os.environ.get(DATABASE_URL_VARIABLE, DEFAULT_DATABASE_URL)
-    engine = create_engine(url)
-    if engine.dialect.name == "sqlite":
-        event.listen(engine, "connect", _enable_sqlite_foreign_keys)
-    metadata.create_all(engine)
+    engine = create_engine(resolve_database_url(url))
+    try:
+        if engine.dialect.name == "sqlite":
+            event.listen(engine, "connect", _enable_sqlite_foreign_keys)
+        metadata.create_all(engine)
+    except BaseException:
+        engine.dispose()
+        raise
     return engine
