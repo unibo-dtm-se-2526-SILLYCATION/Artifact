@@ -107,7 +107,7 @@ def test_fastapi_can_override_repository_dependencies_per_application(tmp_path) 
     trips.get_by_id.assert_called_once_with(trip.id)
     episodes.find_by_trip.assert_called_once_with(trip.id)
     assert create_app().dependency_overrides == {}
-    assert create_app().openapi()["paths"] == {}
+    assert set(create_app().openapi()["paths"]) == {"/api/v1/users"}
 
 
 def test_fastapi_can_override_an_entire_use_case(tmp_path) -> None:

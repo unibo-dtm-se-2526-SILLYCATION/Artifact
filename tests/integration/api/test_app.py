@@ -24,7 +24,7 @@ def test_openapi_is_available_without_business_endpoints() -> None:
     schema = response.json()
     assert schema["info"]["title"] == "Sillycation API"
     assert schema["openapi"].startswith("3.")
-    assert schema["paths"] == {}
+    assert set(schema["paths"]) == {"/api/v1/users"}
 
 
 def test_swagger_documentation_uses_application_openapi() -> None:

@@ -10,6 +10,8 @@ from sqlalchemy.engine import make_url
 from sillycation.adapters.api.dependencies import PersistenceDependencies
 from sillycation.adapters.api.errors import register_exception_handlers
 from sillycation.adapters.api.router import router
+from sillycation.adapters.api.routes.users import router as users_router
+from sillycation.adapters.passwords import Argon2PasswordHasher
 from sillycation.adapters.persistence.database import (
     create_database,
     resolve_database_url,
@@ -46,15 +48,18 @@ def create_app(*, database_url: Optional[str] = None) -> FastAPI:
             )
         engine = create_database(url)
         try:
+            password_hasher = Argon2PasswordHasher()
             app.state.persistence = PersistenceDependencies(
                 users=SqlAlchemyUserRepository(engine),
                 trips=SqlAlchemyTripRepository(engine),
                 episodes=SqlAlchemyEpisodeRepository(engine),
                 unit_of_work_factory=partial(SqliteUnitOfWork, engine),
             )
+            app.state.password_hasher = password_hasher
             try:
                 yield
             finally:
+                del app.state.password_hasher
                 del app.state.persistence
         finally:
             engine.dispose()
@@ -62,4 +67,5 @@ def create_app(*, database_url: Optional[str] = None) -> FastAPI:
     app = FastAPI(title="Sillycation API", version="0.1.0", lifespan=lifespan)
     register_exception_handlers(app)
     app.include_router(router)
+    app.include_router(users_router, prefix=router.prefix)
     return app

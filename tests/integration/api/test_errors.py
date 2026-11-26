@@ -181,7 +181,7 @@ def test_http_exception_handler_and_headers_are_not_overridden() -> None:
 
 
 def test_error_test_routes_do_not_leak_into_public_factory() -> None:
-    assert create_app().openapi()["paths"] == {}
+    assert set(create_app().openapi()["paths"]) == {"/api/v1/users"}
     with TestClient(create_app()) as client:
         assert client.get("/probe").status_code == 404
         assert client.get("/api/v1/trips").status_code == 404

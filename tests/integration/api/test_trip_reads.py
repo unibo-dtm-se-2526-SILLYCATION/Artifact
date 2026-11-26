@@ -130,7 +130,7 @@ def test_production_factory_does_not_expose_protected_routes(path) -> None:
             path, params={"requested_by": "creator"}, headers={"X-User-ID": "creator"}
         )
         assert response.status_code == 404
-        assert client.get("/openapi.json").json()["paths"] == {}
+        assert set(client.get("/openapi.json").json()["paths"]) == {"/api/v1/users"}
 
 
 @pytest.mark.parametrize("path", PATHS)
@@ -297,10 +297,12 @@ def test_internal_openapi_describes_only_versioned_reads_without_actor_input(
     data,
 ) -> None:
     schema = internal_app(data).openapi()
-    assert set(schema["paths"]) == {
+    assert set(schema["paths"]) == {"/api/v1/users"} | {
         path.replace("/trips/trip/", "/trips/{trip_id}/") for path in PATHS
     }
-    for path in schema["paths"].values():
+    for path_name, path in schema["paths"].items():
+        if path_name == "/api/v1/users":
+            continue
         assert set(path) == {"get"}
         operation = path["get"]
         assert "200" in operation["responses"]
@@ -313,7 +315,7 @@ def test_overrides_are_not_shared_with_the_public_factory(data) -> None:
     internal_app(data)
     public = create_app()
     assert public.dependency_overrides == {}
-    assert public.openapi()["paths"] == {}
+    assert set(public.openapi()["paths"]) == {"/api/v1/users"}
 
 
 @pytest.mark.parametrize("reverse_order", [False, True])

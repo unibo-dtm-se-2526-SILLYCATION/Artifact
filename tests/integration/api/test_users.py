@@ -1,8 +1,9 @@
 """Internal registration contracts, with repository/hasher doubles only in tests."""
 
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 from uuid import UUID
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -11,13 +12,13 @@ from sillycation.adapters.api.app import create_app
 from sillycation.adapters.api.dependencies import (
     get_new_user_id,
     get_password_hasher,
-    get_register_user,
-    get_user_repository,
+    get_transactional_commands,
+    get_unit_of_work_factory,
 )
-from sillycation.adapters.api.routes.users import router
 from sillycation.application.ports.passwords import PasswordHasher
 from sillycation.application.ports.repositories import UserRepository
-from sillycation.application.user_use_cases import RegisterUser
+from sillycation.application.ports.unit_of_work import UnitOfWork
+from sillycation.application.transactional import TransactionalCommands
 from sillycation.domain.identifiers import UserId
 from sillycation.domain.user import User
 
@@ -43,21 +44,17 @@ def dependencies():
 def internal_app(dependencies):
     users, passwords = dependencies
     app = create_app()
-    app.include_router(router, prefix="/api/v1")
+    unit = MagicMock(spec=UnitOfWork)
+    unit.__enter__.return_value = unit
+    unit.users = users
     app.dependency_overrides.update(
         {
-            get_user_repository: lambda: users,
+            get_unit_of_work_factory: lambda: lambda: unit,
             get_password_hasher: lambda: passwords,
             get_new_user_id: lambda: USER_ID,
         }
     )
     return app
-
-
-def test_public_factory_does_not_expose_registration() -> None:
-    with TestClient(create_app()) as client:
-        assert client.post(PATH, json=BODY).status_code == 404
-        assert client.get("/openapi.json").json()["paths"] == {}
 
 
 def test_real_use_case_delegates_hashing_and_returns_only_server_identity(
@@ -85,18 +82,17 @@ def test_real_use_case_delegates_hashing_and_returns_only_server_identity(
     assert not hasattr(user, "password")
 
 
-def test_use_case_can_be_overridden_without_resolving_repository_or_hasher() -> None:
-    use_case = Mock(spec=RegisterUser)
-    use_case.execute.return_value = USER_ID
+def test_commands_can_be_overridden_without_resolving_unit_of_work_or_hasher() -> None:
+    commands = Mock(spec=TransactionalCommands)
+    commands.register_user.return_value = USER_ID
     app = create_app()
-    app.include_router(router, prefix="/api/v1")
-    app.dependency_overrides[get_register_user] = lambda: use_case
+    app.dependency_overrides[get_transactional_commands] = lambda: commands
     app.dependency_overrides[get_new_user_id] = lambda: USER_ID
     with TestClient(app) as client:
         response = client.post(PATH, json=BODY)
     assert response.status_code == 201
     assert response.json() == {"id": USER_ID.value}
-    use_case.execute.assert_called_once_with(
+    commands.register_user.assert_called_once_with(
         user_id=USER_ID,
         username=BODY["username"],
         email=BODY["email"],
@@ -231,20 +227,7 @@ def test_hasher_is_explicitly_unconfigured_and_has_no_fallback() -> None:
     with pytest.raises(
         RuntimeError, match="PasswordHasher provider has not been configured"
     ):
-        get_password_hasher()
-
-
-def test_registration_cannot_run_with_only_repository_override(dependencies) -> None:
-    users, _ = dependencies
-    app = create_app()
-    app.include_router(router, prefix="/api/v1")
-    app.dependency_overrides[get_user_repository] = lambda: users
-    with TestClient(app, raise_server_exceptions=False) as client:
-        response = client.post(PATH, json=BODY)
-    assert response.status_code == 500
-    assert response.text == "Internal Server Error"
-    assert PASSWORD not in response.text
-    users.save.assert_not_called()
+        get_password_hasher(Request({"type": "http", "app": create_app()}))
 
 
 @pytest.mark.parametrize("failure", ["hasher", "database"])
@@ -277,10 +260,10 @@ def test_server_user_id_provider_returns_uuid4() -> None:
     assert UUID(identity.value).version == 4
 
 
-def test_internal_openapi_has_registration_without_auth_or_sensitive_response_fields(
-    dependencies,
-) -> None:
-    app = internal_app(dependencies)
+def test_public_openapi_has_only_registration_without_auth_or_sensitive_response_fields() -> (
+    None
+):
+    app = create_app()
     schema = app.openapi()
     assert set(schema["paths"]) == {PATH}
     assert set(schema["paths"][PATH]) == {"post"}
@@ -295,7 +278,6 @@ def test_internal_openapi_has_registration_without_auth_or_sensitive_response_fi
         "properties"
     ]["password"]
     assert password_schema["writeOnly"] is True
-    assert create_app().openapi()["paths"] == {}
     assert create_app().dependency_overrides == {}
 
 

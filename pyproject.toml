@@ -14,6 +14,9 @@ readme = "README.md"
 [tool.poetry.dependencies]
 # update the Python versions in .github/workflows/check.yml if you change this
 python = ">= 3.9.0 < 4.0.0"
+argon2-cffi = "^25.1.0"
+# Bindings 26.x require Python 3.10 or newer.
+argon2-cffi-bindings = "~25.1.0"
 sqlalchemy = "^2.0"
 fastapi = ">=0.128.0,<0.129.0"
 pydantic = ">=2.12.5,<2.13.0"
