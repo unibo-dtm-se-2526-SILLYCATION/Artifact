@@ -15,7 +15,10 @@ from sillycation.adapters.api.errors import register_exception_handlers
 from sillycation.adapters.api.jwt_tokens import JwtTokens
 from sillycation.adapters.api.router import router
 from sillycation.adapters.api.routes.auth import router as auth_router
-from sillycation.adapters.api.routes.trip_reads import trip_list_router
+from sillycation.adapters.api.routes.trip_reads import (
+    public_router as trip_reads_router,
+)
+from sillycation.adapters.api.routes.trips import router as trip_writes_router
 from sillycation.adapters.api.routes.users import router as users_router
 from sillycation.adapters.passwords import Argon2PasswordHasher
 from sillycation.adapters.persistence.database import (
@@ -93,5 +96,6 @@ def create_app(
     app.include_router(users_router, prefix=router.prefix)
     if auth_enabled == "1":
         app.include_router(auth_router, prefix=router.prefix)
-        app.include_router(trip_list_router, prefix=router.prefix)
+        app.include_router(trip_reads_router, prefix=router.prefix)
+        app.include_router(trip_writes_router, prefix=router.prefix)
     return app

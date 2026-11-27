@@ -1,10 +1,4 @@
-"""Protected trip writes, intentionally not mounted by the public factory.
-
-Tests mount this router under /api/v1 with verified-identity overrides.
-The factory translates typed domain/application errors to HTTP responses.
-All business decisions, including approval rejection on overlap, remain in use
-cases. Activation/completion use the server clock, never a client-supplied date.
-"""
+"""Authenticated trip writes through the transactional application facade."""
 
 from datetime import date
 from typing import Annotated
@@ -12,40 +6,31 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 
 from sillycation.adapters.api.dependencies import (
-    get_activate_trip,
-    get_approve_join_request,
-    get_archive_trip,
     get_authenticated_user_id,
-    get_complete_trip,
-    get_create_trip,
     get_current_date,
     get_new_invitation_code,
     get_new_join_request_id,
     get_new_trip_id,
-    get_reject_join_request,
-    get_request_join_trip,
+    get_transactional_commands,
 )
 from sillycation.adapters.api.mappers import join_request_response, trip_response
-from sillycation.adapters.api.openapi import error_responses
+from sillycation.adapters.api.openapi import BEARER_UNAUTHORIZED, error_responses
 from sillycation.adapters.api.schemas.requests import (
     CreateTripRequest,
     RequestJoinTripRequest,
 )
 from sillycation.adapters.api.schemas.responses import JoinRequestResponse, TripResponse
-from sillycation.application.trip_use_cases import (
-    ActivateTrip,
-    ApproveJoinRequest,
-    ArchiveTrip,
-    CompleteTrip,
-    CreateTrip,
-    RejectJoinRequest,
-    RequestJoinTrip,
-)
+from sillycation.application.transactional import TransactionalCommands
 from sillycation.domain.identifiers import JoinRequestId, TripId, UserId
 from sillycation.domain.value_objects import InvitationCode
 
-router = APIRouter(tags=["trips"], dependencies=[Depends(get_authenticated_user_id)])
+router = APIRouter(
+    tags=["trips"],
+    dependencies=[Depends(get_authenticated_user_id)],
+    responses={401: BEARER_UNAUTHORIZED},
+)
 AuthenticatedUserId = Annotated[UserId, Depends(get_authenticated_user_id)]
+TripCommands = Annotated[TransactionalCommands, Depends(get_transactional_commands)]
 
 
 @router.post(
@@ -59,12 +44,12 @@ AuthenticatedUserId = Annotated[UserId, Depends(get_authenticated_user_id)]
 def create_trip(
     body: CreateTripRequest,
     actor: AuthenticatedUserId,
-    use_case: Annotated[CreateTrip, Depends(get_create_trip)],
+    commands: TripCommands,
     trip_id: Annotated[TripId, Depends(get_new_trip_id)],
     invitation_code: Annotated[InvitationCode, Depends(get_new_invitation_code)],
 ) -> TripResponse:
     return trip_response(
-        use_case.execute(
+        commands.create_trip(
             trip_id=trip_id,
             name=body.name,
             creator_id=actor,
@@ -85,11 +70,11 @@ def create_trip(
 def request_join_trip(
     body: RequestJoinTripRequest,
     actor: AuthenticatedUserId,
-    use_case: Annotated[RequestJoinTrip, Depends(get_request_join_trip)],
+    commands: TripCommands,
     request_id: Annotated[JoinRequestId, Depends(get_new_join_request_id)],
 ) -> JoinRequestResponse:
     return join_request_response(
-        use_case.execute(
+        commands.request_join_trip(
             invitation_code=InvitationCode(body.invitation_code),
             request_id=request_id,
             user_id=actor,
@@ -106,10 +91,10 @@ def approve_join_request(
     trip_id: str,
     request_id: str,
     actor: AuthenticatedUserId,
-    use_case: Annotated[ApproveJoinRequest, Depends(get_approve_join_request)],
+    commands: TripCommands,
 ) -> JoinRequestResponse:
     return join_request_response(
-        use_case.execute(
+        commands.approve_join_request(
             trip_id=TripId(trip_id),
             request_id=JoinRequestId(request_id),
             requested_by=actor,
@@ -126,10 +111,10 @@ def reject_join_request(
     trip_id: str,
     request_id: str,
     actor: AuthenticatedUserId,
-    use_case: Annotated[RejectJoinRequest, Depends(get_reject_join_request)],
+    commands: TripCommands,
 ) -> JoinRequestResponse:
     return join_request_response(
-        use_case.execute(
+        commands.reject_join_request(
             trip_id=TripId(trip_id),
             request_id=JoinRequestId(request_id),
             requested_by=actor,
@@ -145,11 +130,11 @@ def reject_join_request(
 def activate_trip(
     trip_id: str,
     actor: AuthenticatedUserId,
-    use_case: Annotated[ActivateTrip, Depends(get_activate_trip)],
+    commands: TripCommands,
     current_date: Annotated[date, Depends(get_current_date)],
 ) -> TripResponse:
     return trip_response(
-        use_case.execute(
+        commands.activate_trip(
             trip_id=TripId(trip_id), requested_by=actor, current_date=current_date
         )
     )
@@ -163,11 +148,11 @@ def activate_trip(
 def complete_trip(
     trip_id: str,
     actor: AuthenticatedUserId,
-    use_case: Annotated[CompleteTrip, Depends(get_complete_trip)],
+    commands: TripCommands,
     current_date: Annotated[date, Depends(get_current_date)],
 ) -> TripResponse:
     return trip_response(
-        use_case.execute(
+        commands.complete_trip(
             trip_id=TripId(trip_id), requested_by=actor, current_date=current_date
         )
     )
@@ -181,6 +166,8 @@ def complete_trip(
 def archive_trip(
     trip_id: str,
     actor: AuthenticatedUserId,
-    use_case: Annotated[ArchiveTrip, Depends(get_archive_trip)],
+    commands: TripCommands,
 ) -> TripResponse:
-    return trip_response(use_case.execute(trip_id=TripId(trip_id), requested_by=actor))
+    return trip_response(
+        commands.archive_trip(trip_id=TripId(trip_id), requested_by=actor)
+    )

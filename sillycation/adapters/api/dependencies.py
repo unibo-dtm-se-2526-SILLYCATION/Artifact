@@ -39,15 +39,6 @@ from sillycation.application.trip_read_use_cases import (
     GetTripParticipants,
     ListMyTrips,
 )
-from sillycation.application.trip_use_cases import (
-    ActivateTrip,
-    ApproveJoinRequest,
-    ArchiveTrip,
-    CompleteTrip,
-    CreateTrip,
-    RejectJoinRequest,
-    RequestJoinTrip,
-)
 from sillycation.application.transactional import TransactionalCommands
 from sillycation.application.voting_use_cases import CastVote
 from sillycation.domain.identifiers import (
@@ -210,38 +201,6 @@ def get_trip_dashboard(
     trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
 ) -> GetTripDashboard:
     return GetTripDashboard(trips, episodes)
-
-
-def get_create_trip(
-    trips: TripRepositoryDependency, users: UserRepositoryDependency
-) -> CreateTrip:
-    return CreateTrip(trips, users)
-
-
-def get_request_join_trip(trips: TripRepositoryDependency) -> RequestJoinTrip:
-    return RequestJoinTrip(trips)
-
-
-def get_approve_join_request(trips: TripRepositoryDependency) -> ApproveJoinRequest:
-    return ApproveJoinRequest(trips)
-
-
-def get_reject_join_request(trips: TripRepositoryDependency) -> RejectJoinRequest:
-    return RejectJoinRequest(trips)
-
-
-def get_activate_trip(trips: TripRepositoryDependency) -> ActivateTrip:
-    return ActivateTrip(trips)
-
-
-def get_complete_trip(
-    trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
-) -> CompleteTrip:
-    return CompleteTrip(trips, episodes)
-
-
-def get_archive_trip(trips: TripRepositoryDependency) -> ArchiveTrip:
-    return ArchiveTrip(trips)
 
 
 def get_create_episode(
