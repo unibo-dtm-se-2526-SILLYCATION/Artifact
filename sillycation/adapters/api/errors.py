@@ -9,6 +9,7 @@ handlers are unchanged. Unexpected exceptions remain server errors.
 from functools import partial
 
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from sillycation.domain.errors import (
@@ -18,6 +19,25 @@ from sillycation.domain.errors import (
     NotAuthorized,
     NotFound,
 )
+
+
+def credential_validation_response(error: RequestValidationError) -> JSONResponse:
+    """Exclude rejected credential values and untrusted field names."""
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={
+            "detail": [
+                {
+                    "type": item["type"],
+                    "loc": ["body"]
+                    if item["type"] == "extra_forbidden"
+                    else item["loc"],
+                    "msg": item["msg"],
+                }
+                for item in error.errors()
+            ]
+        },
+    )
 
 
 ERROR_CONTRACTS = (

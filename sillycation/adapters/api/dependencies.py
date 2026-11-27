@@ -2,12 +2,19 @@
 
 from dataclasses import dataclass
 from datetime import date
+import logging
 from secrets import token_urlsafe
 from typing import Annotated, Callable, Optional
 from uuid import uuid4
 
 from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt.exceptions import InvalidTokenError
 
+from sillycation.adapters.api.authentication import (
+    HttpAuthentication,
+    authentication_required,
+)
 from sillycation.application.episode_read_use_cases import (
     GetTripDashboard,
     ListTripEpisodes,
@@ -53,18 +60,40 @@ from sillycation.domain.identifiers import (
 from sillycation.domain.value_objects import InvitationCode
 
 
-def get_authenticated_user_id() -> UserId:
-    """Block protected routes until step 15 supplies a verified identity.
+logger = logging.getLogger(__name__)
+_bearer = HTTPBearer(auto_error=False, bearerFormat="JWT")
 
-    No headers, query parameters or body fields are trusted as an identity.
-    This is an integration boundary, not an authentication implementation.
-    Only tests currently override it. Protected routers remain unmounted until
-    authentication, persistence composition and HTTP errors are integrated.
-    """
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Protected API is not configured",
+
+def get_http_authentication(request: Request) -> HttpAuthentication:
+    authentication: Optional[HttpAuthentication] = getattr(
+        request.app.state, "authentication", None
     )
+    if authentication is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Protected API is not configured",
+        )
+    return authentication
+
+
+def get_authenticated_user_id(
+    request: Request,
+    credential: Annotated[Optional[HTTPAuthorizationCredentials], Depends(_bearer)],
+) -> UserId:
+    authentication = get_http_authentication(request)
+    if credential is None or len(request.headers.getlist("authorization")) != 1:
+        raise authentication_required()
+    try:
+        user_id = authentication.tokens.verify(credential.credentials)
+        exists = get_user_repository(request).get_by_id(user_id) is not None
+    except InvalidTokenError:
+        raise authentication_required() from None
+    except Exception as error:
+        logger.error("Identity verification failed (%s)", type(error).__name__)
+        raise HTTPException(500, "Internal Server Error") from None
+    if not exists:
+        raise authentication_required()
+    return user_id
 
 
 @dataclass(frozen=True)

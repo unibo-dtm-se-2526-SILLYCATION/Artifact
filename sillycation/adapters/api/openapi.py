@@ -1,8 +1,8 @@
 """Per-operation error documentation, independent of routing/business behavior.
 
 Callers enumerate errors from their actual use case. FastAPI validation stays
-separate from application InvalidData at 422. Protected operations additionally
-document their current fail-closed 503, without inventing authentication/401.
+separate from application InvalidData at 422. Protected operations document
+the fail-closed response for applications with authentication disabled.
 """
 
 from typing import Any, Union
@@ -17,10 +17,18 @@ from sillycation.adapters.api.schemas.errors import (
 )
 
 
+BEARER_UNAUTHORIZED = {
+    "description": "Authentication required.",
+    "headers": {
+        "WWW-Authenticate": {"schema": {"type": "string"}, "example": "Bearer"}
+    },
+}
+
+
 def error_responses(
     *codes: ErrorCode,
     protected: bool = True,
-    registration: bool = False,
+    credentials: bool = False,
 ) -> dict[Union[int, str], dict[str, Any]]:
     """Build documentation only: no handlers, dependencies or routes are changed.
 
@@ -57,7 +65,7 @@ def error_responses(
     }
     validation_model: Any = (
         RegistrationValidationErrorResponse
-        if registration
+        if credentials
         else RequestValidationErrorResponse
     )
     if "invalid_data" in codes:
@@ -67,7 +75,7 @@ def error_responses(
         )
         response["model"] = (
             Union[ApplicationErrorResponse, RegistrationValidationErrorResponse]
-            if registration
+            if credentials
             else Union[ApplicationErrorResponse, RequestValidationErrorResponse]
         )
         response["content"]["application/json"]["examples"]["request_validation"] = (
@@ -83,9 +91,9 @@ def error_responses(
                 }
             },
         }
-    if registration:
+    if credentials:
         responses[422]["description"] += (
-            " Rejected input and context values are omitted from registration errors."
+            " Rejected input and context values are omitted from credential errors."
         )
     if protected:
         responses[503] = {
