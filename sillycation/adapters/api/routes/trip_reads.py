@@ -54,10 +54,11 @@ public_router = APIRouter(
     dependencies=[Depends(get_authenticated_user_id)],
     responses={401: BEARER_UNAUTHORIZED},
 )
-_episode_reads_router = APIRouter(
+episode_reads_router = APIRouter(
     prefix="/trips",
     tags=["trips"],
     dependencies=[Depends(get_authenticated_user_id)],
+    responses={401: BEARER_UNAUTHORIZED},
 )
 AuthenticatedUserId = Annotated[UserId, Depends(get_authenticated_user_id)]
 
@@ -125,7 +126,7 @@ def read_participants(
     ]
 
 
-@_episode_reads_router.get(
+@episode_reads_router.get(
     "/{trip_id}/episodes",
     response_model=list[EpisodeResponse],
     responses=error_responses("not_authorized", "not_found"),
@@ -141,7 +142,7 @@ def read_episodes(
     ]
 
 
-@_episode_reads_router.get(
+@episode_reads_router.get(
     "/{trip_id}/ranking",
     response_model=list[RankingEntryResponse],
     responses=error_responses("not_authorized", "not_found", "invalid_data"),
@@ -157,7 +158,14 @@ def read_ranking(
     ]
 
 
-@_episode_reads_router.get(
+_dashboard_router = APIRouter(
+    prefix="/trips",
+    tags=["trips"],
+    dependencies=[Depends(get_authenticated_user_id)],
+)
+
+
+@_dashboard_router.get(
     "/{trip_id}/dashboard",
     response_model=TripDashboardResponse,
     responses=error_responses("not_authorized", "not_found", "invalid_data"),
@@ -174,4 +182,5 @@ def read_dashboard(
 
 router = APIRouter()
 router.include_router(public_router)
-router.include_router(_episode_reads_router)
+router.include_router(episode_reads_router)
+router.include_router(_dashboard_router)

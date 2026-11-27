@@ -19,12 +19,6 @@ from sillycation.application.episode_read_use_cases import (
     GetTripDashboard,
     ListTripEpisodes,
 )
-from sillycation.application.episode_use_cases import (
-    CreateEpisode,
-    DeleteEpisode,
-    EditEpisode,
-    SubmitEpisode,
-)
 from sillycation.application.ports.passwords import PasswordHasher
 from sillycation.application.ports.repositories import (
     EpisodeRepository,
@@ -40,7 +34,6 @@ from sillycation.application.trip_read_use_cases import (
     ListMyTrips,
 )
 from sillycation.application.transactional import TransactionalCommands
-from sillycation.application.voting_use_cases import CastVote
 from sillycation.domain.identifiers import (
     EpisodeId,
     JoinRequestId,
@@ -201,36 +194,6 @@ def get_trip_dashboard(
     trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
 ) -> GetTripDashboard:
     return GetTripDashboard(trips, episodes)
-
-
-def get_create_episode(
-    trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
-) -> CreateEpisode:
-    return CreateEpisode(trips, episodes)
-
-
-def get_edit_episode(
-    trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
-) -> EditEpisode:
-    return EditEpisode(trips, episodes)
-
-
-def get_delete_episode(
-    trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
-) -> DeleteEpisode:
-    return DeleteEpisode(trips, episodes)
-
-
-def get_submit_episode(
-    trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
-) -> SubmitEpisode:
-    return SubmitEpisode(trips, episodes)
-
-
-def get_cast_vote(
-    trips: TripRepositoryDependency, episodes: EpisodeRepositoryDependency
-) -> CastVote:
-    return CastVote(trips, episodes)
 
 
 def get_transactional_commands(
