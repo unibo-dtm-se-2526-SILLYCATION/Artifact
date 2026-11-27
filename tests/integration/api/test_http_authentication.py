@@ -213,13 +213,16 @@ def test_signature_algorithm_expiration_and_header(clock, monkeypatch) -> None:
         )
         header, payload, signature = token.split(".")
         changed = ("A" if signature[0] != "A" else "B") + signature[1:]
+        unsigned = jwt.encode(claims, "", algorithm="none")
+        assert jwt.get_unverified_header(unsigned)["alg"] == "none"
+        assert unsigned.split(".")[2] == ""
         for headers in (
             {},
             {"Authorization": f"Basic {token}"},
             bearer(f"{header}.{payload}.{changed}"),
             bearer(jwt.encode(claims, b"z" * 32, algorithm="HS256")),
             bearer(jwt.encode(claims, b"z" * 64, algorithm="HS512")),
-            bearer(jwt.encode(claims, None, algorithm="none")),
+            bearer(unsigned),
             bearer("not-a-token"),
         ):
             response = client.get(TRIPS, headers=headers)
