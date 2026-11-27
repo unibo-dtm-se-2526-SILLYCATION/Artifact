@@ -14,7 +14,6 @@ from sillycation.adapters.api import dependencies as deps
 from sillycation.adapters.api.routes.episodes import router as episodes_router
 from sillycation.adapters.api.routes.trip_reads import router as reads_router
 from sillycation.adapters.api.routes.trips import router as trips_router
-from sillycation.adapters.api.routes.users import router as users_router
 from sillycation.adapters.api.schemas.errors import (
     ApplicationErrorResponse,
     ProtectedAPIUnavailableResponse,
@@ -164,7 +163,7 @@ OPERATIONS = [
         "post",
         "/api/v1/users",
         201,
-        deps.get_register_user,
+        deps.get_transactional_commands,
         ("duplicate", "invalid_data"),
     ),
 ]
@@ -179,7 +178,7 @@ ERRORS = {
 
 def internal_app():
     app = create_app()
-    for router in (reads_router, trips_router, episodes_router, users_router):
+    for router in (reads_router, trips_router, episodes_router):
         app.include_router(router, prefix="/api/v1")
     return app
 
@@ -285,7 +284,8 @@ def test_documented_example_matches_actual_handler_response(
     # Inject a typed failure to check HTTP/schema agreement, not business rules.
     error_type, status_code = ERRORS[code]
     use_case = Mock()
-    use_case.execute.side_effect = error_type("PRIVATE_PASSWORD PRIVATE_HASH")
+    operation = use_case.register_user if path == "/api/v1/users" else use_case.execute
+    operation.side_effect = error_type("PRIVATE_PASSWORD PRIVATE_HASH")
     app = internal_app()
     app.dependency_overrides[deps.get_authenticated_user_id] = lambda: UserId("actor")
     app.dependency_overrides[provider] = lambda: use_case
@@ -351,7 +351,7 @@ def test_registration_validation_schema_and_runtime_exclude_credential_values(
     standard = schema["components"]["schemas"]["RequestValidationErrorDetail"]
     assert standard["additionalProperties"] is True
     app = internal_app()
-    app.dependency_overrides[deps.get_register_user] = lambda: Mock()
+    app.dependency_overrides[deps.get_transactional_commands] = lambda: Mock()
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/users",
@@ -386,9 +386,9 @@ def test_documentation_adds_neither_operations_nor_public_routes(schema) -> None
             "204"
         ]
     )
-    assert create_app().openapi()["paths"] == {}
+    assert set(create_app().openapi()["paths"]) == {"/api/v1/users"}
     with TestClient(create_app()) as client:
-        for method, path, _, _, _ in OPERATIONS:
+        for method, path, _, _, _ in PROTECTED_OPERATIONS:
             assert (
                 client.request(
                     method, concrete_path(path), json=request_body(path)

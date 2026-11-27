@@ -131,7 +131,7 @@ def test_writes_are_not_mounted_in_public_factory(
 ) -> None:
     with TestClient(create_app()) as client:
         assert client.post(path, json=body).status_code == 404
-        assert client.get("/openapi.json").json()["paths"] == {}
+        assert set(client.get("/openapi.json").json()["paths"]) == {"/api/v1/users"}
 
 
 @pytest.mark.parametrize("path,body,provider,case_type,expected_status", OPERATIONS)
@@ -468,13 +468,13 @@ def test_providers_allocate_server_owned_values_and_repository_is_explicit(
 
 def test_internal_openapi_exposes_no_actor_clock_or_generated_ids(data) -> None:
     paths = internal_app(data).openapi()["paths"]
-    assert len(paths) == 7
+    assert len(paths) == 8
     for path in paths.values():
         assert set(path) == {"post"}
         operation = path["post"]
         names = {parameter["name"] for parameter in operation.get("parameters", [])}
         assert names <= {"trip_id", "request_id"}
-    assert create_app().openapi()["paths"] == {}
+    assert set(create_app().openapi()["paths"]) == {"/api/v1/users"}
     assert create_app().dependency_overrides == {}
 
 

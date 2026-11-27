@@ -184,7 +184,7 @@ def test_episode_routes_remain_unmounted_in_production(
 ) -> None:
     with TestClient(create_app()) as client:
         assert client.request(method, path, json=body).status_code == 404
-        assert client.get("/openapi.json").json()["paths"] == {}
+        assert set(client.get("/openapi.json").json()["paths"]) == {"/api/v1/users"}
 
 
 @pytest.mark.parametrize(
@@ -654,6 +654,7 @@ def test_internal_openapi_has_only_five_operations_and_no_actor_input(data) -> N
     operations = [
         (path, method, operation)
         for path, item in paths.items()
+        if path != "/api/v1/users"
         for method, operation in item.items()
     ]
     assert len(operations) == 5
@@ -671,5 +672,5 @@ def test_internal_openapi_has_only_five_operations_and_no_actor_input(data) -> N
         "content"
         not in paths["/api/v1/episodes/{episode_id}"]["delete"]["responses"]["204"]
     )
-    assert create_app().openapi()["paths"] == {}
+    assert set(create_app().openapi()["paths"]) == {"/api/v1/users"}
     assert create_app().dependency_overrides == {}

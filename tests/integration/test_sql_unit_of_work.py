@@ -268,7 +268,7 @@ def test_writer_timeout_is_real_and_does_not_leak_writes_or_locks(
     engine: Engine,
 ) -> None:
     with engine.connect() as connection:
-        original_timeout = connection.exec_driver_sql(
+        original_timeout: int = connection.exec_driver_sql(
             "PRAGMA busy_timeout"
         ).scalar_one()
 
@@ -357,7 +357,7 @@ def test_cleanup_failure_preserves_original_exception_and_releases_context(
     cleanup = RuntimeError("cleanup error")
     fail_cleanup = False
     with engine.connect() as connection:
-        previous = connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
+        previous: int = connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
 
     def fail(connection, cursor, statement, parameters, context, executemany):
         if fail_cleanup and statement == f"PRAGMA busy_timeout={previous}":

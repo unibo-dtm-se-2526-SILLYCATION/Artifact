@@ -41,7 +41,7 @@ from sillycation.application.trip_use_cases import (
     RejectJoinRequest,
     RequestJoinTrip,
 )
-from sillycation.application.user_use_cases import RegisterUser
+from sillycation.application.transactional import TransactionalCommands
 from sillycation.application.voting_use_cases import CastVote
 from sillycation.domain.identifiers import (
     EpisodeId,
@@ -100,9 +100,13 @@ def get_unit_of_work_factory(request: Request) -> Callable[[], UnitOfWork]:
     return _get_persistence(request).unit_of_work_factory
 
 
-def get_password_hasher() -> PasswordHasher:
-    """Require a real hasher from the composition root; no insecure fallback."""
-    raise RuntimeError("PasswordHasher provider has not been configured")
+def get_password_hasher(request: Request) -> PasswordHasher:
+    hasher: Optional[PasswordHasher] = getattr(
+        request.app.state, "password_hasher", None
+    )
+    if hasher is None:
+        raise RuntimeError("PasswordHasher provider has not been configured")
+    return hasher
 
 
 def get_new_user_id() -> UserId:
@@ -241,7 +245,8 @@ def get_cast_vote(
     return CastVote(trips, episodes)
 
 
-def get_register_user(
-    users: UserRepositoryDependency, passwords: PasswordHasherDependency
-) -> RegisterUser:
-    return RegisterUser(users, passwords)
+def get_transactional_commands(
+    factory: Annotated[Callable[[], UnitOfWork], Depends(get_unit_of_work_factory)],
+    passwords: PasswordHasherDependency,
+) -> TransactionalCommands:
+    return TransactionalCommands(factory, passwords)
