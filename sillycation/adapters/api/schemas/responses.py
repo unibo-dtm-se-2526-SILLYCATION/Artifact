@@ -6,7 +6,7 @@ Dates use ISO 8601, enums their string values, and Decimal scores JSON strings
 
 from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -16,6 +16,12 @@ from sillycation.domain.trip import JoinRequestStatus, TripStatus
 
 class RegisteredUserResponse(BaseModel):
     id: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
 
 
 class TripSummaryResponse(BaseModel):

@@ -24,7 +24,7 @@ class RegisterUserRequest(RequestBody):
 
 
 class LoginRequest(RequestBody):
-    """Credentials only; the authentication response belongs to step 15."""
+    """Credentials supplied to the login endpoint."""
 
     username: NonBlankText
     password: SecretStr = Field(strict=True, min_length=1)

@@ -231,10 +231,12 @@ def test_only_pertinent_statuses_and_application_examples_are_documented(
     expected = {str(success), "422"} | {str(ERRORS[code][1]) for code in codes}
     if path != "/api/v1/users":
         expected.add("503")
+    if method == "get" and path == "/api/v1/trips":
+        expected.add("401")
     assert set(responses) == expected
     documented_codes = set()
     for status_code, response in responses.items():
-        if int(status_code) < 400 or status_code == "503":
+        if int(status_code) < 400 or status_code in ("401", "503"):
             continue
         content = response["content"]["application/json"]
         assert response["description"]

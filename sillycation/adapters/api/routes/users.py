@@ -6,7 +6,7 @@ from typing import Annotated, Callable, Coroutine, Any
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse
 from fastapi.routing import APIRoute
 from sqlalchemy.exc import IntegrityError
 
@@ -14,6 +14,7 @@ from sillycation.adapters.api.dependencies import (
     get_new_user_id,
     get_transactional_commands,
 )
+from sillycation.adapters.api.errors import credential_validation_response
 from sillycation.adapters.api.mappers import registered_user_response
 from sillycation.adapters.api.openapi import error_responses
 from sillycation.adapters.api.schemas.requests import RegisterUserRequest
@@ -55,21 +56,7 @@ class _RegistrationRoute(APIRoute):
             try:
                 return await handler(request)
             except RequestValidationError as error:
-                return JSONResponse(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    content={
-                        "detail": [
-                            {
-                                "type": item["type"],
-                                "loc": ["body"]
-                                if item["type"] == "extra_forbidden"
-                                else item["loc"],
-                                "msg": item["msg"],
-                            }
-                            for item in error.errors()
-                        ]
-                    },
-                )
+                return credential_validation_response(error)
             except SillycationError:
                 raise
             except Exception as error:
@@ -92,7 +79,7 @@ router = APIRouter(prefix="/users", tags=["users"], route_class=_RegistrationRou
     response_model=RegisteredUserResponse,
     status_code=status.HTTP_201_CREATED,
     responses=error_responses(
-        "duplicate", "invalid_data", protected=False, registration=True
+        "duplicate", "invalid_data", protected=False, credentials=True
     ),
 )
 def register_user(

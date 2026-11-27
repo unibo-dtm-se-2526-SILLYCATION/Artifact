@@ -1,9 +1,4 @@
-"""Read-only routes awaiting secure identity and HTTP error integration.
-
-Intentionally NOT included in the public versioned router. Tests mount this
-router with dependency overrides. Existing use cases enforce creator/member
-permissions and draft visibility; the factory translates typed errors to HTTP.
-"""
+"""Trip reads whose permissions are enforced by the existing use cases."""
 
 from typing import Annotated
 
@@ -28,7 +23,7 @@ from sillycation.adapters.api.mappers import (
     ranking_entry_response,
     trip_summary_response,
 )
-from sillycation.adapters.api.openapi import error_responses
+from sillycation.adapters.api.openapi import BEARER_UNAUTHORIZED, error_responses
 from sillycation.adapters.api.schemas.responses import (
     EpisodeResponse,
     InvitationCodeResponse,
@@ -53,7 +48,13 @@ from sillycation.domain.identifiers import TripId, UserId
 
 # Run the gate before constructing any use case/repository, even if a future
 # handler inadvertently omits the identity argument. FastAPI caches it per request.
-router = APIRouter(
+router = APIRouter()
+trip_list_router = APIRouter(
+    prefix="/trips",
+    tags=["trips"],
+    dependencies=[Depends(get_authenticated_user_id)],
+)
+_details_router = APIRouter(
     prefix="/trips",
     tags=["trips"],
     dependencies=[Depends(get_authenticated_user_id)],
@@ -61,7 +62,11 @@ router = APIRouter(
 AuthenticatedUserId = Annotated[UserId, Depends(get_authenticated_user_id)]
 
 
-@router.get("", response_model=list[TripSummaryResponse], responses=error_responses())
+@trip_list_router.get(
+    "",
+    response_model=list[TripSummaryResponse],
+    responses={**error_responses(), 401: BEARER_UNAUTHORIZED},
+)
 def list_my_trips(
     actor: AuthenticatedUserId,
     use_case: Annotated[ListMyTrips, Depends(get_list_my_trips)],
@@ -73,7 +78,7 @@ def list_my_trips(
     ]
 
 
-@router.get(
+@_details_router.get(
     "/{trip_id}/invitation-code",
     response_model=InvitationCodeResponse,
     responses=error_responses("not_authorized", "not_found"),
@@ -88,7 +93,7 @@ def read_invitation_code(
     )
 
 
-@router.get(
+@_details_router.get(
     "/{trip_id}/join-requests",
     response_model=list[JoinRequestResponse],
     responses=error_responses("not_authorized", "not_found"),
@@ -104,7 +109,7 @@ def read_pending_join_requests(
     ]
 
 
-@router.get(
+@_details_router.get(
     "/{trip_id}/participants",
     response_model=list[ParticipantResponse],
     responses=error_responses("not_authorized", "not_found"),
@@ -120,7 +125,7 @@ def read_participants(
     ]
 
 
-@router.get(
+@_details_router.get(
     "/{trip_id}/episodes",
     response_model=list[EpisodeResponse],
     responses=error_responses("not_authorized", "not_found"),
@@ -136,7 +141,7 @@ def read_episodes(
     ]
 
 
-@router.get(
+@_details_router.get(
     "/{trip_id}/ranking",
     response_model=list[RankingEntryResponse],
     responses=error_responses("not_authorized", "not_found", "invalid_data"),
@@ -152,7 +157,7 @@ def read_ranking(
     ]
 
 
-@router.get(
+@_details_router.get(
     "/{trip_id}/dashboard",
     response_model=TripDashboardResponse,
     responses=error_responses("not_authorized", "not_found", "invalid_data"),
@@ -165,3 +170,7 @@ def read_dashboard(
     return dashboard_response(
         use_case.execute(trip_id=TripId(trip_id), requested_by=actor)
     )
+
+
+router.include_router(trip_list_router)
+router.include_router(_details_router)
