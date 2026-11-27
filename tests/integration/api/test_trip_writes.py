@@ -1,7 +1,7 @@
 """Internal write routes exercise existing use cases; no production auth bypass."""
 
 from datetime import date, timedelta
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 from uuid import UUID
 
 from fastapi import Request
@@ -10,20 +10,13 @@ import pytest
 
 from sillycation.adapters.api.app import create_app
 from sillycation.adapters.api.dependencies import (
-    get_activate_trip,
-    get_approve_join_request,
-    get_archive_trip,
     get_authenticated_user_id,
-    get_complete_trip,
-    get_create_trip,
     get_current_date,
-    get_episode_repository,
     get_new_invitation_code,
     get_new_join_request_id,
     get_new_trip_id,
-    get_reject_join_request,
-    get_request_join_trip,
-    get_trip_repository,
+    get_transactional_commands,
+    get_unit_of_work_factory,
     get_user_repository,
 )
 from sillycation.adapters.api.routes.trips import router
@@ -32,6 +25,8 @@ from sillycation.application.ports.repositories import (
     TripRepository,
     UserRepository,
 )
+from sillycation.application.ports.unit_of_work import UnitOfWork
+from sillycation.application.transactional import TransactionalCommands
 from sillycation.application.trip_use_cases import (
     ActivateTrip,
     ApproveJoinRequest,
@@ -58,19 +53,19 @@ BODY = {"name": "Roma", "start_date": "2026-11-10", "end_date": "2026-11-10"}
 APPROVE = "/api/v1/trips/trip/join-requests/pending/approve"
 REJECT = "/api/v1/trips/trip/join-requests/pending/reject"
 OPERATIONS = [
-    ("/api/v1/trips", BODY, get_create_trip, CreateTrip, 201),
+    ("/api/v1/trips", BODY, "create_trip", CreateTrip, 201),
     (
         "/api/v1/join-requests",
         {"invitation_code": "CODE"},
-        get_request_join_trip,
+        "request_join_trip",
         RequestJoinTrip,
         201,
     ),
-    (APPROVE, None, get_approve_join_request, ApproveJoinRequest, 200),
-    (REJECT, None, get_reject_join_request, RejectJoinRequest, 200),
-    ("/api/v1/trips/trip/activate", None, get_activate_trip, ActivateTrip, 200),
-    ("/api/v1/trips/trip/complete", None, get_complete_trip, CompleteTrip, 200),
-    ("/api/v1/trips/trip/archive", None, get_archive_trip, ArchiveTrip, 200),
+    (APPROVE, None, "approve_join_request", ApproveJoinRequest, 200),
+    (REJECT, None, "reject_join_request", RejectJoinRequest, 200),
+    ("/api/v1/trips/trip/activate", None, "activate_trip", ActivateTrip, 200),
+    ("/api/v1/trips/trip/complete", None, "complete_trip", CompleteTrip, 200),
+    ("/api/v1/trips/trip/archive", None, "archive_trip", ArchiveTrip, 200),
 ]
 
 
@@ -108,14 +103,15 @@ def data():
 
 def internal_app(data, actor=CREATOR):
     _, trips, users, episodes, _ = data
+    unit = MagicMock(spec=UnitOfWork)
+    unit.__enter__.return_value = unit
+    unit.trips, unit.users, unit.episodes = trips, users, episodes
     app = create_app()
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides.update(
         {
             get_authenticated_user_id: lambda: actor,
-            get_trip_repository: lambda: trips,
-            get_user_repository: lambda: users,
-            get_episode_repository: lambda: episodes,
+            get_unit_of_work_factory: lambda: lambda: unit,
             get_new_trip_id: lambda: NEW_TRIP,
             get_new_join_request_id: lambda: NEW_REQUEST,
             get_new_invitation_code: lambda: NEW_CODE,
@@ -125,28 +121,28 @@ def internal_app(data, actor=CREATOR):
     return app
 
 
-@pytest.mark.parametrize("path,body,provider,case_type,expected_status", OPERATIONS)
-def test_writes_are_not_mounted_in_public_factory(
-    path, body, provider, case_type, expected_status
+@pytest.mark.parametrize("path,body,command_name,case_type,expected_status", OPERATIONS)
+def test_writes_are_not_mounted_when_authentication_is_disabled(
+    path, body, command_name, case_type, expected_status
 ) -> None:
     with TestClient(create_app()) as client:
         assert client.post(path, json=body).status_code == 404
         assert set(client.get("/openapi.json").json()["paths"]) == {"/api/v1/users"}
 
 
-@pytest.mark.parametrize("path,body,provider,case_type,expected_status", OPERATIONS)
+@pytest.mark.parametrize("path,body,command_name,case_type,expected_status", OPERATIONS)
 @pytest.mark.parametrize(
     "headers", [{}, {"X-User-ID": "creator"}, {"Authorization": "Bearer invented"}]
 )
 def test_gate_blocks_before_use_cases_repositories_and_generators(
-    path, body, provider, case_type, expected_status, headers
+    path, body, command_name, case_type, expected_status, headers
 ) -> None:
     app = create_app()
     app.include_router(router, prefix="/api/v1")
     forbidden = Mock(
         side_effect=AssertionError("Must not resolve protected dependencies")
     )
-    app.dependency_overrides[provider] = forbidden
+    app.dependency_overrides[get_transactional_commands] = forbidden
     for generator in (
         get_new_trip_id,
         get_new_join_request_id,
@@ -166,19 +162,20 @@ def test_gate_blocks_before_use_cases_repositories_and_generators(
     forbidden.assert_not_called()
 
 
-@pytest.mark.parametrize("path,body,provider,case_type,expected_status", OPERATIONS)
-def test_each_route_delegates_exactly_to_existing_use_case(
-    data, path, body, provider, case_type, expected_status
+@pytest.mark.parametrize("path,body,command_name,case_type,expected_status", OPERATIONS)
+def test_each_route_delegates_to_the_matching_transactional_command(
+    data, path, body, command_name, case_type, expected_status
 ) -> None:
     trip, _, _, _, _ = data
-    use_case = Mock(spec=case_type)
-    use_case.execute.return_value = (
+    commands = Mock(spec=TransactionalCommands)
+    command = getattr(commands, command_name)
+    command.return_value = (
         JoinRequest(NEW_REQUEST, trip.id, MEMBER)
         if case_type in (RequestJoinTrip, ApproveJoinRequest, RejectJoinRequest)
         else trip
     )
     app = internal_app(data, MEMBER)
-    app.dependency_overrides[provider] = lambda: use_case
+    app.dependency_overrides[get_transactional_commands] = lambda: commands
     with TestClient(app) as client:
         response = client.post(
             path,
@@ -216,7 +213,7 @@ def test_each_route_delegates_exactly_to_existing_use_case(
             expected["request_id"] = JoinRequestId("pending")
         if case_type in (ActivateTrip, CompleteTrip):
             expected["current_date"] = DAY
-    use_case.execute.assert_called_once_with(**expected)
+    command.assert_called_once_with(**expected)
     assert "invitation_code" not in response.json()
 
 
@@ -289,12 +286,12 @@ def test_creator_rejection_does_not_add_participant(data) -> None:
     ],
 )
 def test_create_rejects_invalid_http_input_without_execution(data, changes) -> None:
-    use_case = Mock(spec=CreateTrip)
+    commands = Mock(spec=TransactionalCommands)
     app = internal_app(data)
-    app.dependency_overrides[get_create_trip] = lambda: use_case
+    app.dependency_overrides[get_transactional_commands] = lambda: commands
     with TestClient(app) as client:
         assert client.post("/api/v1/trips", json={**BODY, **changes}).status_code == 422
-    use_case.execute.assert_not_called()
+    commands.create_trip.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -307,12 +304,12 @@ def test_create_rejects_invalid_http_input_without_execution(data, changes) -> N
     ],
 )
 def test_join_validates_body_without_execution(data, body) -> None:
-    use_case = Mock(spec=RequestJoinTrip)
+    commands = Mock(spec=TransactionalCommands)
     app = internal_app(data)
-    app.dependency_overrides[get_request_join_trip] = lambda: use_case
+    app.dependency_overrides[get_transactional_commands] = lambda: commands
     with TestClient(app) as client:
         assert client.post("/api/v1/join-requests", json=body).status_code == 422
-    use_case.execute.assert_not_called()
+    commands.request_join_trip.assert_not_called()
 
 
 @pytest.mark.parametrize(

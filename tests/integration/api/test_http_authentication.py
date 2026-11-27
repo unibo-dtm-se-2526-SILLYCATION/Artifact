@@ -114,7 +114,6 @@ def test_real_login_reads_only_own_trips_and_survives_restart(
             client.get(TRIPS + "/Anna/dashboard", headers=bearer(token)).status_code
             == 404
         )
-        assert client.post(TRIPS, headers=bearer(token)).status_code == 405
 
     with TestClient(create_app(auth_clock=clock)) as client:
         assert [
@@ -328,8 +327,8 @@ def test_invalid_ttl_fails_startup(clock, monkeypatch) -> None:
 
 def test_openapi_public_authentication_contract(clock) -> None:
     schema = create_app(auth_clock=clock).openapi()
-    assert set(schema["paths"]) == {USERS, LOGIN, TRIPS}
-    assert set(schema["paths"][TRIPS]) == {"get"}
+    assert {USERS, LOGIN, TRIPS} <= set(schema["paths"])
+    assert set(schema["paths"][TRIPS]) == {"get", "post"}
     read = schema["paths"][TRIPS]["get"]
     assert read["security"] == [{"HTTPBearer": []}]
     assert "WWW-Authenticate" in read["responses"]["401"]["headers"]

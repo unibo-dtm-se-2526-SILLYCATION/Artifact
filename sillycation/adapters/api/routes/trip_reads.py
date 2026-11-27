@@ -48,13 +48,13 @@ from sillycation.domain.identifiers import TripId, UserId
 
 # Run the gate before constructing any use case/repository, even if a future
 # handler inadvertently omits the identity argument. FastAPI caches it per request.
-router = APIRouter()
-trip_list_router = APIRouter(
+public_router = APIRouter(
     prefix="/trips",
     tags=["trips"],
     dependencies=[Depends(get_authenticated_user_id)],
+    responses={401: BEARER_UNAUTHORIZED},
 )
-_details_router = APIRouter(
+_episode_reads_router = APIRouter(
     prefix="/trips",
     tags=["trips"],
     dependencies=[Depends(get_authenticated_user_id)],
@@ -62,10 +62,10 @@ _details_router = APIRouter(
 AuthenticatedUserId = Annotated[UserId, Depends(get_authenticated_user_id)]
 
 
-@trip_list_router.get(
+@public_router.get(
     "",
     response_model=list[TripSummaryResponse],
-    responses={**error_responses(), 401: BEARER_UNAUTHORIZED},
+    responses=error_responses(),
 )
 def list_my_trips(
     actor: AuthenticatedUserId,
@@ -78,7 +78,7 @@ def list_my_trips(
     ]
 
 
-@_details_router.get(
+@public_router.get(
     "/{trip_id}/invitation-code",
     response_model=InvitationCodeResponse,
     responses=error_responses("not_authorized", "not_found"),
@@ -93,7 +93,7 @@ def read_invitation_code(
     )
 
 
-@_details_router.get(
+@public_router.get(
     "/{trip_id}/join-requests",
     response_model=list[JoinRequestResponse],
     responses=error_responses("not_authorized", "not_found"),
@@ -109,7 +109,7 @@ def read_pending_join_requests(
     ]
 
 
-@_details_router.get(
+@public_router.get(
     "/{trip_id}/participants",
     response_model=list[ParticipantResponse],
     responses=error_responses("not_authorized", "not_found"),
@@ -125,7 +125,7 @@ def read_participants(
     ]
 
 
-@_details_router.get(
+@_episode_reads_router.get(
     "/{trip_id}/episodes",
     response_model=list[EpisodeResponse],
     responses=error_responses("not_authorized", "not_found"),
@@ -141,7 +141,7 @@ def read_episodes(
     ]
 
 
-@_details_router.get(
+@_episode_reads_router.get(
     "/{trip_id}/ranking",
     response_model=list[RankingEntryResponse],
     responses=error_responses("not_authorized", "not_found", "invalid_data"),
@@ -157,7 +157,7 @@ def read_ranking(
     ]
 
 
-@_details_router.get(
+@_episode_reads_router.get(
     "/{trip_id}/dashboard",
     response_model=TripDashboardResponse,
     responses=error_responses("not_authorized", "not_found", "invalid_data"),
@@ -172,5 +172,6 @@ def read_dashboard(
     )
 
 
-router.include_router(trip_list_router)
-router.include_router(_details_router)
+router = APIRouter()
+router.include_router(public_router)
+router.include_router(_episode_reads_router)

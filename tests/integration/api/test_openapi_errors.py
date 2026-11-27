@@ -79,49 +79,49 @@ OPERATIONS = [
         "post",
         "/api/v1/trips",
         201,
-        deps.get_create_trip,
+        deps.get_transactional_commands,
         ("not_found", "invalid_state", "duplicate", "invalid_data"),
     ),
     (
         "post",
         "/api/v1/join-requests",
         201,
-        deps.get_request_join_trip,
+        deps.get_transactional_commands,
         ("not_found", "invalid_state", "duplicate"),
     ),
     (
         "post",
         "/api/v1/trips/{trip_id}/join-requests/{request_id}/approve",
         200,
-        deps.get_approve_join_request,
+        deps.get_transactional_commands,
         ("not_authorized", "not_found", "invalid_state"),
     ),
     (
         "post",
         "/api/v1/trips/{trip_id}/join-requests/{request_id}/reject",
         200,
-        deps.get_reject_join_request,
+        deps.get_transactional_commands,
         ("not_authorized", "not_found", "invalid_state"),
     ),
     (
         "post",
         "/api/v1/trips/{trip_id}/activate",
         200,
-        deps.get_activate_trip,
+        deps.get_transactional_commands,
         ("not_authorized", "not_found", "invalid_state"),
     ),
     (
         "post",
         "/api/v1/trips/{trip_id}/complete",
         200,
-        deps.get_complete_trip,
+        deps.get_transactional_commands,
         ("not_authorized", "not_found", "invalid_state"),
     ),
     (
         "post",
         "/api/v1/trips/{trip_id}/archive",
         200,
-        deps.get_archive_trip,
+        deps.get_transactional_commands,
         ("not_authorized", "not_found", "invalid_state"),
     ),
     (
@@ -231,7 +231,20 @@ def test_only_pertinent_statuses_and_application_examples_are_documented(
     expected = {str(success), "422"} | {str(ERRORS[code][1]) for code in codes}
     if path != "/api/v1/users":
         expected.add("503")
-    if method == "get" and path == "/api/v1/trips":
+    if (
+        method == "get"
+        and path
+        in {
+            "/api/v1/trips",
+            "/api/v1/trips/{trip_id}/invitation-code",
+            "/api/v1/trips/{trip_id}/join-requests",
+            "/api/v1/trips/{trip_id}/participants",
+        }
+    ) or (
+        method == "post"
+        and provider is deps.get_transactional_commands
+        and path != "/api/v1/users"
+    ):
         expected.add("401")
     assert set(responses) == expected
     documented_codes = set()
@@ -272,6 +285,19 @@ def test_only_pertinent_statuses_and_application_examples_are_documented(
     )
 
 
+def transactional_method(path: str) -> str:
+    return {
+        "/api/v1/users": "register_user",
+        "/api/v1/trips": "create_trip",
+        "/api/v1/join-requests": "request_join_trip",
+        "/api/v1/trips/{trip_id}/join-requests/{request_id}/approve": "approve_join_request",
+        "/api/v1/trips/{trip_id}/join-requests/{request_id}/reject": "reject_join_request",
+        "/api/v1/trips/{trip_id}/activate": "activate_trip",
+        "/api/v1/trips/{trip_id}/complete": "complete_trip",
+        "/api/v1/trips/{trip_id}/archive": "archive_trip",
+    }[path]
+
+
 ERROR_CASES = [
     (method, path, provider, code)
     for method, path, _, provider, codes in OPERATIONS
@@ -286,7 +312,11 @@ def test_documented_example_matches_actual_handler_response(
     # Inject a typed failure to check HTTP/schema agreement, not business rules.
     error_type, status_code = ERRORS[code]
     use_case = Mock()
-    operation = use_case.register_user if path == "/api/v1/users" else use_case.execute
+    operation = (
+        getattr(use_case, transactional_method(path))
+        if provider is deps.get_transactional_commands
+        else use_case.execute
+    )
     operation.side_effect = error_type("PRIVATE_PASSWORD PRIVATE_HASH")
     app = internal_app()
     app.dependency_overrides[deps.get_authenticated_user_id] = lambda: UserId("actor")
@@ -322,8 +352,12 @@ def test_current_gate_503_is_documented_without_resolving_repositories(
 @pytest.mark.parametrize(
     "path,body,provider",
     [
-        ("/api/v1/trips", {"name": 7}, deps.get_create_trip),
-        ("/api/v1/join-requests", {"invitation_code": 7}, deps.get_request_join_trip),
+        ("/api/v1/trips", {"name": 7}, deps.get_transactional_commands),
+        (
+            "/api/v1/join-requests",
+            {"invitation_code": 7},
+            deps.get_transactional_commands,
+        ),
         ("/api/v1/trips/trip/episodes", {"title": 7}, deps.get_create_episode),
         ("/api/v1/episodes/episode/votes", {"value": True}, deps.get_cast_vote),
     ],
@@ -341,7 +375,8 @@ def test_standard_validation_body_matches_documented_detail_format(
     assert "error" not in response.json()
     parsed = RequestValidationErrorResponse.model_validate(response.json())
     assert parsed.model_dump() == response.json()
-    use_case.execute.assert_not_called()
+    use_case.assert_not_called()
+    assert use_case.mock_calls == []
 
 
 def test_registration_validation_schema_and_runtime_exclude_credential_values(
