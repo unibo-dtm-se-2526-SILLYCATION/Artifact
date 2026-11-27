@@ -1,43 +1,64 @@
-"""Protected episode/vote operations; not mounted by the public factory.
+"""Authenticated episode and vote writes through the transactional facade."""
 
-Actor identity and generated IDs are server dependencies. Existing use cases
-enforce membership, authorship, lifecycle, dates and voting rules. Submission
-opens voting and the last eligible vote completes the episode automatically.
-"""
+import logging
+from typing import Annotated, Any, Callable, Coroutine
 
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import PlainTextResponse
+from fastapi.routing import APIRoute
 
 from sillycation.adapters.api.dependencies import (
     get_authenticated_user_id,
-    get_cast_vote,
-    get_create_episode,
-    get_delete_episode,
-    get_edit_episode,
     get_new_episode_id,
     get_new_vote_id,
-    get_submit_episode,
+    get_transactional_commands,
 )
+from sillycation.adapters.api.errors import credential_validation_response
 from sillycation.adapters.api.mappers import episode_response
-from sillycation.adapters.api.openapi import error_responses
+from sillycation.adapters.api.openapi import BEARER_UNAUTHORIZED, error_responses
 from sillycation.adapters.api.schemas.requests import (
     CastVoteRequest,
     CreateEpisodeRequest,
     EditEpisodeRequest,
 )
 from sillycation.adapters.api.schemas.responses import EpisodeResponse
-from sillycation.application.episode_use_cases import (
-    CreateEpisode,
-    DeleteEpisode,
-    EditEpisode,
-    SubmitEpisode,
-)
-from sillycation.application.voting_use_cases import CastVote
+from sillycation.application.transactional import TransactionalCommands
+from sillycation.domain.errors import SillycationError
 from sillycation.domain.identifiers import EpisodeId, TripId, UserId, VoteId
 
-router = APIRouter(tags=["episodes"], dependencies=[Depends(get_authenticated_user_id)])
+logger = logging.getLogger(__name__)
+
+
+class _EpisodeWriteRoute(APIRoute):
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def handle(request: Request) -> Response:
+            try:
+                return await handler(request)
+            except RequestValidationError as error:
+                return credential_validation_response(error)
+            except (SillycationError, HTTPException):
+                raise
+            except Exception as error:
+                logger.error("Episode write failed (%s)", type(error).__name__)
+                return PlainTextResponse(
+                    "Internal Server Error",
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+        return handle
+
+
+router = APIRouter(
+    tags=["episodes"],
+    dependencies=[Depends(get_authenticated_user_id)],
+    responses={401: BEARER_UNAUTHORIZED},
+    route_class=_EpisodeWriteRoute,
+)
 AuthenticatedUserId = Annotated[UserId, Depends(get_authenticated_user_id)]
+EpisodeCommands = Annotated[TransactionalCommands, Depends(get_transactional_commands)]
 
 
 @router.post(
@@ -52,11 +73,11 @@ def create_episode(
     trip_id: str,
     body: CreateEpisodeRequest,
     actor: AuthenticatedUserId,
-    use_case: Annotated[CreateEpisode, Depends(get_create_episode)],
+    commands: EpisodeCommands,
     episode_id: Annotated[EpisodeId, Depends(get_new_episode_id)],
 ) -> EpisodeResponse:
     return episode_response(
-        use_case.execute(
+        commands.create_episode(
             episode_id=episode_id,
             trip_id=TripId(trip_id),
             author_id=actor,
@@ -79,10 +100,10 @@ def edit_episode(
     episode_id: str,
     body: EditEpisodeRequest,
     actor: AuthenticatedUserId,
-    use_case: Annotated[EditEpisode, Depends(get_edit_episode)],
+    commands: EpisodeCommands,
 ) -> EpisodeResponse:
     return episode_response(
-        use_case.execute(
+        commands.edit_episode(
             episode_id=EpisodeId(episode_id),
             requested_by=actor,
             protagonist_id=UserId(body.protagonist_id),
@@ -101,9 +122,9 @@ def edit_episode(
 def delete_episode(
     episode_id: str,
     actor: AuthenticatedUserId,
-    use_case: Annotated[DeleteEpisode, Depends(get_delete_episode)],
+    commands: EpisodeCommands,
 ) -> Response:
-    use_case.execute(episode_id=EpisodeId(episode_id), requested_by=actor)
+    commands.delete_episode(episode_id=EpisodeId(episode_id), requested_by=actor)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -115,10 +136,10 @@ def delete_episode(
 def submit_episode(
     episode_id: str,
     actor: AuthenticatedUserId,
-    use_case: Annotated[SubmitEpisode, Depends(get_submit_episode)],
+    commands: EpisodeCommands,
 ) -> EpisodeResponse:
     return episode_response(
-        use_case.execute(episode_id=EpisodeId(episode_id), requested_by=actor)
+        commands.submit_episode(episode_id=EpisodeId(episode_id), requested_by=actor)
     )
 
 
@@ -134,11 +155,11 @@ def cast_vote(
     episode_id: str,
     body: CastVoteRequest,
     actor: AuthenticatedUserId,
-    use_case: Annotated[CastVote, Depends(get_cast_vote)],
+    commands: EpisodeCommands,
     vote_id: Annotated[VoteId, Depends(get_new_vote_id)],
 ) -> EpisodeResponse:
     return episode_response(
-        use_case.execute(
+        commands.cast_vote(
             episode_id=EpisodeId(episode_id),
             vote_id=vote_id,
             voter_id=actor,

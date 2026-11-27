@@ -15,6 +15,8 @@ from sillycation.adapters.api.errors import register_exception_handlers
 from sillycation.adapters.api.jwt_tokens import JwtTokens
 from sillycation.adapters.api.router import router
 from sillycation.adapters.api.routes.auth import router as auth_router
+from sillycation.adapters.api.routes.episodes import router as episode_writes_router
+from sillycation.adapters.api.routes.trip_reads import episode_reads_router
 from sillycation.adapters.api.routes.trip_reads import (
     public_router as trip_reads_router,
 )
@@ -98,4 +100,6 @@ def create_app(
         app.include_router(auth_router, prefix=router.prefix)
         app.include_router(trip_reads_router, prefix=router.prefix)
         app.include_router(trip_writes_router, prefix=router.prefix)
+        app.include_router(episode_reads_router, prefix=router.prefix)
+        app.include_router(episode_writes_router, prefix=router.prefix)
     return app

@@ -183,13 +183,18 @@ def test_concurrent_join_requests_both_survive(clock, tmp_path) -> None:
         assert {item["user_id"] for item in stored.json()} == {first_id, second_id}
 
 
-def test_public_openapi_exposes_only_trip_operations_and_authentication(clock) -> None:
+def test_public_openapi_exposes_the_vertical_slice_operations(clock) -> None:
     paths = create_app(auth_clock=clock).openapi()["paths"]
     expected = {
         "/api/v1/users": {"post"},
         "/api/v1/auth/login": {"post"},
         TRIPS: {"get", "post"},
         JOIN: {"post"},
+        f"{TRIPS}/{{trip_id}}/episodes": {"get", "post"},
+        f"{TRIPS}/{{trip_id}}/ranking": {"get"},
+        "/api/v1/episodes/{episode_id}": {"put", "delete"},
+        "/api/v1/episodes/{episode_id}/submit": {"post"},
+        "/api/v1/episodes/{episode_id}/votes": {"post"},
         f"{TRIPS}/{{trip_id}}/invitation-code": {"get"},
         f"{TRIPS}/{{trip_id}}/join-requests": {"get"},
         f"{TRIPS}/{{trip_id}}/participants": {"get"},

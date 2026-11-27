@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from datetime import date
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -12,18 +12,17 @@ from sqlalchemy.exc import IntegrityError
 from sillycation.adapters.api.app import create_app
 from sillycation.adapters.api.dependencies import (
     get_authenticated_user_id,
-    get_cast_vote,
-    get_create_episode,
-    get_delete_episode,
-    get_edit_episode,
     get_episode_repository,
     get_new_episode_id,
     get_new_vote_id,
-    get_submit_episode,
     get_trip_repository,
+    get_transactional_commands,
+    get_unit_of_work_factory,
 )
 from sillycation.adapters.api.routes.episodes import router
 from sillycation.adapters.api.routes.trip_reads import router as read_router
+from sillycation.application.ports.unit_of_work import UnitOfWork
+from sillycation.application.transactional import TransactionalCommands
 from sillycation.application.episode_use_cases import (
     CreateEpisode,
     DeleteEpisode,
@@ -62,17 +61,17 @@ OPERATIONS = [
         "POST",
         "/api/v1/trips/trip/episodes",
         BODY,
-        get_create_episode,
+        "create_episode",
         CreateEpisode,
         201,
     ),
-    ("PUT", "/api/v1/episodes/draft", BODY, get_edit_episode, EditEpisode, 200),
-    ("DELETE", "/api/v1/episodes/draft", None, get_delete_episode, DeleteEpisode, 204),
+    ("PUT", "/api/v1/episodes/draft", BODY, "edit_episode", EditEpisode, 200),
+    ("DELETE", "/api/v1/episodes/draft", None, "delete_episode", DeleteEpisode, 204),
     (
         "POST",
         "/api/v1/episodes/draft/submit",
         None,
-        get_submit_episode,
+        "submit_episode",
         SubmitEpisode,
         200,
     ),
@@ -80,7 +79,7 @@ OPERATIONS = [
         "POST",
         "/api/v1/episodes/draft/votes",
         {"value": 4},
-        get_cast_vote,
+        "cast_vote",
         CastVote,
         201,
     ),
@@ -161,12 +160,16 @@ def data():
 
 def internal_app(data, actor=CREATOR):
     _, trips, episodes, _ = data
+    unit = MagicMock(spec=UnitOfWork)
+    unit.__enter__.return_value = unit
+    unit.trips, unit.episodes = trips, episodes
     app = create_app()
     app.include_router(router, prefix="/api/v1")
     app.include_router(read_router, prefix="/api/v1")
     app.dependency_overrides.update(
         {
             get_authenticated_user_id: lambda: actor,
+            get_unit_of_work_factory: lambda: lambda: unit,
             get_trip_repository: lambda: trips,
             get_episode_repository: lambda: episodes,
             get_new_episode_id: lambda: NEW_EPISODE,
@@ -177,10 +180,10 @@ def internal_app(data, actor=CREATOR):
 
 
 @pytest.mark.parametrize(
-    "method,path,body,provider,case_type,expected_status", OPERATIONS
+    "method,path,body,command_name,case_type,expected_status", OPERATIONS
 )
-def test_episode_routes_remain_unmounted_in_production(
-    method, path, body, provider, case_type, expected_status
+def test_episode_routes_are_unmounted_when_authentication_is_disabled(
+    method, path, body, command_name, case_type, expected_status
 ) -> None:
     with TestClient(create_app()) as client:
         assert client.request(method, path, json=body).status_code == 404
@@ -188,18 +191,18 @@ def test_episode_routes_remain_unmounted_in_production(
 
 
 @pytest.mark.parametrize(
-    "method,path,body,provider,case_type,expected_status", OPERATIONS
+    "method,path,body,command_name,case_type,expected_status", OPERATIONS
 )
 @pytest.mark.parametrize(
     "headers", [{}, {"X-User-ID": "creator"}, {"Authorization": "Bearer invented"}]
 )
 def test_identity_gate_blocks_protected_dependencies(
-    method, path, body, provider, case_type, expected_status, headers
+    method, path, body, command_name, case_type, expected_status, headers
 ) -> None:
     app = create_app()
     app.include_router(router, prefix="/api/v1")
     forbidden = Mock(side_effect=AssertionError("Protected dependency must not run"))
-    for dependency in (provider, get_new_episode_id, get_new_vote_id):
+    for dependency in (get_transactional_commands, get_new_episode_id, get_new_vote_id):
         app.dependency_overrides[dependency] = forbidden
     with TestClient(app) as client:
         response = client.request(
@@ -214,18 +217,19 @@ def test_identity_gate_blocks_protected_dependencies(
 
 
 @pytest.mark.parametrize(
-    "method,path,body,provider,case_type,expected_status", OPERATIONS
+    "method,path,body,command_name,case_type,expected_status", OPERATIONS
 )
 def test_routes_delegate_actor_and_server_ids_without_query_spoofing(
-    data, method, path, body, provider, case_type, expected_status
+    data, method, path, body, command_name, case_type, expected_status
 ) -> None:
     _, _, _, stored = data
-    use_case = Mock(spec=case_type)
-    use_case.execute.return_value = (
+    commands = Mock(spec=TransactionalCommands)
+    command = getattr(commands, command_name)
+    command.return_value = (
         None if case_type is DeleteEpisode else stored[EpisodeId("draft")]
     )
     app = internal_app(data, OTHER)
-    app.dependency_overrides[provider] = lambda: use_case
+    app.dependency_overrides[get_transactional_commands] = lambda: commands
     with TestClient(app) as client:
         response = client.request(
             method,
@@ -267,7 +271,7 @@ def test_routes_delegate_actor_and_server_ids_without_query_spoofing(
         )
     else:
         expected = dict(episode_id=EpisodeId("draft"), requested_by=OTHER)
-    use_case.execute.assert_called_once_with(**expected)
+    command.assert_called_once_with(**expected)
     if case_type is DeleteEpisode:
         assert response.content == b""
 
@@ -404,23 +408,23 @@ def test_submitted_and_later_episodes_are_immutable(
     ],
 )
 @pytest.mark.parametrize(
-    "method,path,provider,case_type",
+    "method,path,command_name,case_type",
     [
-        ("POST", "/api/v1/trips/trip/episodes", get_create_episode, CreateEpisode),
-        ("PUT", "/api/v1/episodes/draft", get_edit_episode, EditEpisode),
+        ("POST", "/api/v1/trips/trip/episodes", "create_episode", CreateEpisode),
+        ("PUT", "/api/v1/episodes/draft", "edit_episode", EditEpisode),
     ],
 )
 def test_episode_body_validation_rejects_bad_and_server_owned_fields(
-    data, changes, method, path, provider, case_type
+    data, changes, method, path, command_name, case_type
 ) -> None:
-    use_case = Mock(spec=case_type)
+    commands = Mock(spec=TransactionalCommands)
     app = internal_app(data)
-    app.dependency_overrides[provider] = lambda: use_case
+    app.dependency_overrides[get_transactional_commands] = lambda: commands
     with TestClient(app) as client:
         response = client.request(method, path, json={**BODY, **changes})
     assert response.status_code == 422
     assert "detail" in response.json()
-    use_case.execute.assert_not_called()
+    assert commands.mock_calls == []
 
 
 @pytest.mark.parametrize(
@@ -456,14 +460,14 @@ def test_outsider_cannot_create_episode(data) -> None:
     "value", [True, False, "3", "", 3.0, 2.5, 0, 6, -1, None, [], {}]
 )
 def test_vote_http_input_requires_integer_one_to_five(data, value) -> None:
-    use_case = Mock(spec=CastVote)
+    commands = Mock(spec=TransactionalCommands)
     app = internal_app(data)
-    app.dependency_overrides[get_cast_vote] = lambda: use_case
+    app.dependency_overrides[get_transactional_commands] = lambda: commands
     with TestClient(app) as client:
         response = client.post("/api/v1/episodes/draft/votes", json={"value": value})
     assert response.status_code == 422
     assert "detail" in response.json()
-    use_case.execute.assert_not_called()
+    assert commands.mock_calls == []
 
 
 @pytest.mark.parametrize(
@@ -574,10 +578,10 @@ def test_last_eligible_vote_automatically_completes_different_group_sizes(
     "status", [TripStatus.PLANNED, TripStatus.COMPLETED, TripStatus.ARCHIVED]
 )
 @pytest.mark.parametrize(
-    "method,path,body,provider,case_type,expected_status", OPERATIONS
+    "method,path,body,command_name,case_type,expected_status", OPERATIONS
 )
 def test_game_writes_are_rejected_for_non_active_trip(
-    data, status, method, path, body, provider, case_type, expected_status
+    data, status, method, path, body, command_name, case_type, expected_status
 ) -> None:
     trip, trips, episodes, stored = data
     if status is TripStatus.PLANNED:
@@ -600,10 +604,10 @@ def test_game_writes_are_rejected_for_non_active_trip(
 
 
 @pytest.mark.parametrize(
-    "method,path,body,provider,case_type,expected_status", OPERATIONS
+    "method,path,body,command_name,case_type,expected_status", OPERATIONS
 )
 def test_missing_resources_return_not_found_without_writes(
-    data, method, path, body, provider, case_type, expected_status
+    data, method, path, body, command_name, case_type, expected_status
 ) -> None:
     _, _, episodes, _ = data
     path = path.replace("/trips/trip/", "/trips/missing/").replace(

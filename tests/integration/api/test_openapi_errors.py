@@ -128,35 +128,35 @@ OPERATIONS = [
         "post",
         "/api/v1/trips/{trip_id}/episodes",
         201,
-        deps.get_create_episode,
+        deps.get_transactional_commands,
         ("not_authorized", "not_found", "invalid_state", "duplicate", "invalid_data"),
     ),
     (
         "put",
         "/api/v1/episodes/{episode_id}",
         200,
-        deps.get_edit_episode,
+        deps.get_transactional_commands,
         ("not_authorized", "not_found", "invalid_state", "invalid_data"),
     ),
     (
         "delete",
         "/api/v1/episodes/{episode_id}",
         204,
-        deps.get_delete_episode,
+        deps.get_transactional_commands,
         ("not_authorized", "not_found", "invalid_state"),
     ),
     (
         "post",
         "/api/v1/episodes/{episode_id}/submit",
         200,
-        deps.get_submit_episode,
+        deps.get_transactional_commands,
         ("not_authorized", "not_found", "invalid_state"),
     ),
     (
         "post",
         "/api/v1/episodes/{episode_id}/votes",
         201,
-        deps.get_cast_vote,
+        deps.get_transactional_commands,
         ("not_authorized", "not_found", "invalid_state", "duplicate", "invalid_data"),
     ),
     (
@@ -239,12 +239,10 @@ def test_only_pertinent_statuses_and_application_examples_are_documented(
             "/api/v1/trips/{trip_id}/invitation-code",
             "/api/v1/trips/{trip_id}/join-requests",
             "/api/v1/trips/{trip_id}/participants",
+            "/api/v1/trips/{trip_id}/episodes",
+            "/api/v1/trips/{trip_id}/ranking",
         }
-    ) or (
-        method == "post"
-        and provider is deps.get_transactional_commands
-        and path != "/api/v1/users"
-    ):
+    ) or (provider is deps.get_transactional_commands and path != "/api/v1/users"):
         expected.add("401")
     assert set(responses) == expected
     documented_codes = set()
@@ -285,8 +283,13 @@ def test_only_pertinent_statuses_and_application_examples_are_documented(
     )
 
 
-def transactional_method(path: str) -> str:
+def transactional_method(method: str, path: str) -> str:
+    if path == "/api/v1/episodes/{episode_id}":
+        return {"put": "edit_episode", "delete": "delete_episode"}[method]
     return {
+        "/api/v1/trips/{trip_id}/episodes": "create_episode",
+        "/api/v1/episodes/{episode_id}/submit": "submit_episode",
+        "/api/v1/episodes/{episode_id}/votes": "cast_vote",
         "/api/v1/users": "register_user",
         "/api/v1/trips": "create_trip",
         "/api/v1/join-requests": "request_join_trip",
@@ -313,7 +316,7 @@ def test_documented_example_matches_actual_handler_response(
     error_type, status_code = ERRORS[code]
     use_case = Mock()
     operation = (
-        getattr(use_case, transactional_method(path))
+        getattr(use_case, transactional_method(method, path))
         if provider is deps.get_transactional_commands
         else use_case.execute
     )
@@ -358,8 +361,12 @@ def test_current_gate_503_is_documented_without_resolving_repositories(
             {"invitation_code": 7},
             deps.get_transactional_commands,
         ),
-        ("/api/v1/trips/trip/episodes", {"title": 7}, deps.get_create_episode),
-        ("/api/v1/episodes/episode/votes", {"value": True}, deps.get_cast_vote),
+        ("/api/v1/trips/trip/episodes", {"title": 7}, deps.get_transactional_commands),
+        (
+            "/api/v1/episodes/episode/votes",
+            {"value": True},
+            deps.get_transactional_commands,
+        ),
     ],
 )
 def test_standard_validation_body_matches_documented_detail_format(
